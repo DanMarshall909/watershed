@@ -1,0 +1,1879 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Watershed</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;800&family=Chivo+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a field-survey console. The map is the page; a narrow instrument rail beside it holds
+   the season dial, census chart, tools and log, and drops below the map on phones. */
+:root {
+  --ground: #E9ECE4;
+  --panel: #F6F7F2;
+  --ink: #1C2219;
+  --muted: #5A6355;
+  --line: #CBD1C4;
+  --accent: #2F6B4F;
+  --warn: #A8442A;
+  --display: 'Chivo', system-ui, sans-serif;
+  --mono: 'Chivo Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #10140F; --panel: #171C15; --ink: #E3E8DD; --muted: #9AA493; --line: #2C3428;
+    --accent: #7FC29E; --warn: #E8876B; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #10140F; --panel: #171C15; --ink: #E3E8DD; --muted: #9AA493; --line: #2C3428;
+  --accent: #7FC29E; --warn: #E8876B; color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--ground); color: var(--ink); font-family: var(--display);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 24px; box-sizing: border-box;
+}
+* { box-sizing: border-box; }
+.app { max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; }
+h1 { margin: 0; font-weight: 800; font-size: 28px; letter-spacing: -0.02em; }
+.tag { color: var(--muted); font-size: 14px; margin: 0; max-width: 60ch; text-wrap: balance; }
+.main { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.map-wrap { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.map-frame { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #0d1a26; touch-action: none; }
+canvas#map[hidden] { display: none; }
+canvas#map { display: block; width: 100%; height: auto; cursor: crosshair; }
+.view-row { justify-content: space-between; }
+.relief { min-width: 180px; flex: 0 1 240px; }
+#frame canvas.three { display: block; width: 100%; height: auto; }
+/* Full screen: the world fills the screen (true full screen where the browser allows it, otherwise
+   the whole window), with a button to come back. */
+.map-frame.immersive { position: fixed; inset: 0; z-index: 50; border: 0; border-radius: 0; }
+.exit-full { position: absolute; top: 12px; right: 12px; opacity: 0.85; }
+.exit-full:hover { opacity: 1; }
+.readout { font-family: var(--mono); font-size: 12px; color: var(--muted); min-height: 1.5em; font-variant-numeric: tabular-nums; }
+.rail { flex: 1 1 300px; min-width: 0; max-width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+button, select {
+  font: 600 13px var(--display); color: var(--ink); background: var(--ground); border: 1px solid var(--line);
+  border-radius: 5px; padding: 8px 11px; min-height: 36px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+button.primary { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+.tool { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+.season { display: flex; align-items: center; gap: 12px; }
+.season canvas { flex: 0 0 auto; }
+.season-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.season-name { font-weight: 800; font-size: 18px; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.small { font-size: 12px; color: var(--muted); }
+.census { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; font-size: 13px; }
+.census span.n { font-family: var(--mono); font-variant-numeric: tabular-nums; margin-left: auto; }
+.census div { display: flex; align-items: center; gap: 6px; }
+.census .gone { color: var(--warn); }
+canvas#chart { width: 100%; height: 110px; display: block; }
+.score { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.score b { font-family: var(--mono); font-size: 22px; font-variant-numeric: tabular-nums; }
+ol.log { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; max-height: 132px; overflow: auto; }
+ol.log li { color: var(--muted); }
+ol.log li b { color: var(--ink); font-weight: 600; }
+ol.log li.bad b { color: var(--warn); }
+label.slider { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+label.slider input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.ic { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+button .ic { margin-right: 2px; }
+button { display: inline-flex; align-items: center; gap: 6px; }
+.legend .ic, .census .ic { width: 16px; height: 16px; }
+.legend canvas.pic { width: 20px; height: 20px; background: #7d8a5a; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="app">
+  <div class="top">
+    <h1>Watershed</h1>
+    <p class="tag">Shape the land, steer the rain, and keep prey, hunters, foragers and scavengers alive through the wet and the dry. Water follows the ground and wears it away: rivers cut their valleys, lakes fill the hollows and slowly silt up, and the sun takes the water back. Illnesses come and go, droughts and floods arrive without warning, volcanoes wake, and newcomers wander in from the edges.</p>
+  </div>
+
+  <div class="main">
+    <div class="map-wrap">
+      <div class="row view-row">
+        <label class="slider relief" for="relief" id="reliefWrap">Relief <input id="relief" type="range" min="4" max="40" value="16"></label>
+        <span class="small" id="viewHint">Drag to orbit with Inspect. With a tool, drag paints and right-drag orbits. Scroll to zoom.</span>
+      </div>
+      <div class="map-frame" id="frame"><canvas id="map" aria-label="Map of the watershed: terrain, water, plants and animals"></canvas><button id="exitFull" class="exit-full" type="button" data-icon="shrink" hidden>Exit full screen</button></div>
+      <div class="readout" id="readout">Hover the map to inspect a square.</div>
+      <div class="legend" aria-label="Map key" id="legend"></div>
+    </div>
+
+    <div class="rail">
+      <div class="card">
+        <div class="row">
+          <button id="play" class="primary" type="button" data-icon="pause"><span>Pause</span></button>
+          <select id="speed" aria-label="Simulation speed">
+            <option value="1">1× speed</option>
+            <option value="2" selected>2× speed</option>
+            <option value="4">4× speed</option>
+            <option value="8">8× speed</option>
+          </select>
+          <button id="storm" type="button" data-icon="storm">Call a storm</button>
+          <button id="volcano" type="button" data-icon="volcano">Wake a volcano</button>
+          <button id="newworld" type="button" data-icon="world">New world</button>
+          <button id="recentre" type="button" data-icon="recentre">Re-centre view</button>
+          <button id="fullscreen" type="button" data-icon="expand">Full screen</button>
+        </div>
+        <div class="row">
+          <label class="small" for="preset">World type</label>
+          <select id="preset"></select>
+        </div>
+        <div class="row">
+          <label class="small" for="detail">Detail</label>
+          <select id="detail">
+            <option value="standard">Standard (160 × 100)</option>
+            <option value="fine">Fine (240 × 150)</option>
+            <option value="ultra">Ultra (320 × 200, slower)</option>
+          </select>
+        </div>
+        <p class="small" id="presetBlurb"></p>
+        <div class="season">
+          <canvas id="dial" width="64" height="64" aria-hidden="true"></canvas>
+          <div class="season-text">
+            <span class="season-name" id="seasonName">Wet season</span>
+            <span class="small mono" id="seasonDay">Year 1 · day 1</span>
+            <span class="small" id="waterLine">Water: —</span>
+            <span class="small" id="soilLine">Soil health: —</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="label">Census</p>
+        <div class="census" id="census"></div>
+        <canvas id="chart" aria-label="Population over the last 600 days"></canvas>
+        <div class="score">
+          <span class="small">Days with all four species</span>
+          <span><b id="streak">0</b> <span class="small">best <span class="mono" id="best">0</span></span></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="label">Tools</p>
+        <div class="row" role="group" aria-label="Brush tool" id="tools"></div>
+        <label class="slider" for="brush">Brush size <input id="brush" type="range" min="1" max="10" value="3"><span class="mono" id="brushOut">3</span></label>
+        <label class="slider" for="intensity">Brush strength <input id="intensity" type="range" min="1" max="10" value="5"><span class="mono" id="intensityOut">5</span></label>
+      </div>
+
+      <div class="card">
+        <p class="label">Field log</p>
+        <ol class="log" id="log"></ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+// ---------- icons ----------
+// One small line-drawn set (24-unit grid, drawn in the current text colour unless a colour is
+// given) for tools, controls, the census and the map key.
+const ICONS = {
+  inspect: '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20"/>',
+  raise: '<path d="M3 20h18"/><path d="M5 20c2-5 4-7 7-7s5 2 7 7"/><path d="M12 10V3M9 6l3-3 3 3"/>',
+  dig: '<path d="M3 13h5c1 4 2 6 4 6s3-2 4-6h5"/><path d="M12 3v9M9 9l3 3 3-3"/>',
+  smooth: '<path d="M3 14c3-4 6 4 9 0s6 4 9 0"/><path d="M3 19h18"/>',
+  roughen: '<path d="M3 18l3-6 3 3 3-8 3 6 2-3 4 8"/>',
+  flatten: '<path d="M3 12h18"/><path d="M12 3v5M9.5 5.5L12 8l2.5-2.5"/><path d="M12 21v-5M9.5 18.5L12 16l2.5 2.5"/>',
+  tree: '<path d="M12 22v-5"/><path d="M12 2l6 8h-3l4 6H5l4-6H6z"/>',
+  scrub: '<path d="M4 19h16"/><path d="M6 19c0-4 2-6 4-6 1-3 4-3 5 0 2 0 3 2 3 6"/>',
+  snow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M10 5l2 2 2-2M10 19l2-2 2 2"/>',
+  plant: '<path d="M12 21v-9"/><path d="M12 12c0-4 3-7 7-7 0 4-3 7-7 7z"/><path d="M12 15c0-3-2-5-6-5 0 3 2 5 6 5z"/>',
+  prey: '<path d="M4 13c0-2 2-3 5-3h5l2-2"/><path d="M16 8l1-4M16 8l3-3"/><path d="M14 10c2 0 3 1 3 3"/><path d="M6 13v6M9 13v6M14 13v6M17 13v6"/>',
+  hunter: '<path d="M5 6l2 5v4a5 5 0 0 0 10 0v-4l2-5-4 2H9z"/><path d="M10 14h.01M14 14h.01"/><path d="M11 17h2"/>',
+  forager: '<path d="M4 14c0-4 3-7 8-7s8 3 8 7-3 5-8 5-8-1-8-5z"/><path d="M9 16h6"/><path d="M8 8L6 4M16 8l2-4"/><path d="M10 13h.01M14 13h.01"/>',
+  scavenger: '<path d="M2 9c4 0 7 2 10 7 3-5 6-7 10-7"/><path d="M12 16v3"/><path d="M10 10a2 2 0 1 1 4 0"/>',
+  remove: '<path d="M6 6l12 12M18 6L6 18"/>',
+  play: '<path d="M8 5l11 7-11 7z"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>',
+  storm: '<path d="M7 15a4 4 0 0 1 .5-8 5 5 0 0 1 9.4 1.5A3.5 3.5 0 0 1 17 15"/><path d="M12 12l-2 4h4l-2 5"/>',
+  volcano: '<path d="M3 20l6-10h6l6 10z"/><path d="M10 10l2 3 2-3"/><path d="M12 7c-1-2 1-3 0-5M15 6c1-1 2-1 3-3"/>',
+  world: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  shrink: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
+  recentre: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  rock: '<path d="M3 19l6-9 4 5 3-3 5 7z"/>',
+  water: '<path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z"/>',
+  lava: '<path d="M3 17c3-2 5 1 9-1s6 1 9-1"/><path d="M6 12c2-1 3 1 6-1 2-1 4 0 6-1"/><path d="M9 7c1-1 2 0 3-1"/>',
+  fire: '<path d="M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-3 2-4 2-6 1 2 2 2 3 2 0-2-1-4 0-6z"/>',
+  soil: '<path d="M3 18h18"/><path d="M8 18l2-4-2-3M15 18l-1-3 2-3"/>',
+  ash: '<path d="M3 18h18"/><path d="M6 15h.01M10 13h.01M14 15h.01M18 13h.01M8 10h.01M16 10h.01"/>',
+  remains: '<path d="M8 8a2 2 0 1 1-2.6-2.6A2 2 0 1 1 8 8l8 8a2 2 0 1 1 2.6 2.6A2 2 0 1 1 16 16z"/>',
+  sick: '<circle cx="12" cy="12" r="4"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>'
+};
+function icon(name, colour) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'ic'); s.setAttribute('aria-hidden', 'true');
+  if (colour) s.style.stroke = colour;
+  s.innerHTML = ICONS[name];
+  return s;
+}
+
+// ---------- world size and constants ----------
+// Detail: how many squares make up the same landscape. Finer grids look smoother but take longer
+// to simulate. Anything measured in squares (hills, volcanoes, clouds, slopes, how much land a
+// river drains) is scaled by K so the world plays the same at every detail.
+const DETAIL = { standard: 1, fine: 1.5, ultra: 2 };
+let detail = 'standard';
+try { const d = localStorage.getItem('watershed-detail'); if (d && DETAIL[d]) detail = d; } catch (e) {}
+const K = DETAIL[detail];
+const W = Math.round(160 * K), H = Math.round(100 * K), N = W * H;
+const SEASON = 400;                       // days per year: wet half, then dry half
+const SP = { PREY: 1, HUNTER: 2, FORAGER: 3, SCAV: 4 };
+const NAMES = { 1: 'Prey', 2: 'Hunters', 3: 'Foragers', 4: 'Scavengers' };
+const COLOURS = { 1: [232, 226, 207], 2: [226, 85, 46], 3: [43, 179, 166], 4: [162, 107, 219] };
+// cost: energy burned per day; gain: energy per meal; breed: energy needed to split;
+// starve / parch: days without food / water before death.
+const TRAITS = {
+  1: { cost: 1, gain: 4, breed: 9, starve: 8, parch: 10 },
+  2: { cost: 1.2, gain: 9, breed: 20, starve: 18, parch: 14 },
+  3: { cost: 0.6, gain: 5, breed: 15, starve: 24, parch: 18 },
+  4: { cost: 0.5, gain: 4, breed: 10, starve: 30, parch: 16 }
+};
+const CROWDING = 0.6, FIGHT = 0.3, KIN_FIGHT = 0.6;
+// How much water each kind of plant cover draws from the ground: bare, grass, scrub, trees.
+const THIRST = [0, 0.6, 0.8, 1.3];
+// Presets: each world type sets the climate (average wetness and how hard the seasons swing), how
+// much rain falls and how fast the sun takes it back, the mountains, how often illness appears,
+// and the starting share of the map for each species.
+const PRESETS = {
+  valley: { name: 'River valley', blurb: 'Balanced seasons, a few ridges and rivers. The standard survey.',
+    climate: 0.5, swing: 0.45, rain: 0.012, evap: 0.006, peaks: 3, peakHeight: 1, rockLine: 0.84, disease: 1, volcano: 1,
+    start: { prey: 0.078, hunters: 0.008, foragers: 0.008, scav: 0.006 } },
+  drought: { name: 'Drought country', blurb: 'A dry climate with harsh summers. Lakes shrink fast and water holes get crowded.',
+    climate: 0.4, swing: 0.5, rain: 0.011, evap: 0.0075, peaks: 2, peakHeight: 0.9, rockLine: 0.86, disease: 1, volcano: 1,
+    start: { prey: 0.07, hunters: 0.006, foragers: 0.008, scav: 0.006 } },
+  wetlands: { name: 'Wetlands', blurb: 'Mild seasons, low ground and slow evaporation. Lakes everywhere and plenty to eat.',
+    climate: 0.62, swing: 0.3, rain: 0.014, evap: 0.0045, peaks: 1, peakHeight: 0.7, rockLine: 0.92, disease: 1, volcano: 0.5,
+    start: { prey: 0.09, hunters: 0.008, foragers: 0.008, scav: 0.006 } },
+  highlands: { name: 'Highlands', blurb: 'Steep ranges split the land. Fast rivers, small lakes and plenty of bare rock.',
+    climate: 0.52, swing: 0.45, rain: 0.012, evap: 0.006, peaks: 7, peakHeight: 1.35, rockLine: 0.6, disease: 1, volcano: 2.5,
+    start: { prey: 0.075, hunters: 0.008, foragers: 0.008, scav: 0.006 } },
+  plague: { name: 'Plague years', blurb: 'An ordinary valley where illness breaks out four times as often.',
+    climate: 0.5, swing: 0.45, rain: 0.012, evap: 0.006, peaks: 3, peakHeight: 1, rockLine: 0.84, disease: 4, volcano: 1,
+    start: { prey: 0.078, hunters: 0.008, foragers: 0.008, scav: 0.006 } },
+  hunters: { name: 'Hunting grounds', blurb: 'Twice the predators from day one. Can the prey hold on?',
+    climate: 0.52, swing: 0.4, rain: 0.012, evap: 0.006, peaks: 3, peakHeight: 1, rockLine: 0.84, disease: 1, volcano: 1,
+    start: { prey: 0.08, hunters: 0.016, foragers: 0.014, scav: 0.008 } }
+};
+let P = PRESETS.valley;
+// Disease, per species: how long an illness lasts, the daily chance a sick animal dies, the daily
+// chance it infects each healthy neighbour of its kind, and how long survivors stay immune.
+// `share` is the species' usual share of the map, used to judge how crowded it is.
+const DISEASE = {
+  1: { days: 22, death: 0.03, spread: 0.12, immune: 160, share: 0.04 },
+  2: { days: 26, death: 0.025, spread: 0.22, immune: 180, share: 0.008 },
+  3: { days: 26, death: 0.022, spread: 0.22, immune: 180, share: 0.008 },
+  4: { days: 30, death: 0.012, spread: 0.18, immune: 200, share: 0.008 }
+};
+
+// Neighbour table (8 directions, -1 off the map): the map has edges, and water drains off them.
+const NB = new Int32Array(N * 8);
+for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+  let k = 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    if (!dx && !dy) continue;
+    const nx = x + dx, ny = y + dy;
+    NB[(y * W + x) * 8 + k++] = nx < 0 || ny < 0 || nx >= W || ny >= H ? -1 : ny * W + nx;
+  }
+}
+
+let rand = Math.random;
+function seeded(seed) {
+  let s = (seed * 2654435761) % 2147483647 || 1;
+  return () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+}
+
+// ---------- state ----------
+let S = null;
+function newWorld(seed) {
+  rand = seeded(seed);
+  S = {
+    seed, day: 0, storm: 0,
+    elev: new Float32Array(N), rock: new Uint8Array(N),
+    filled: new Float32Array(N), depth: new Float32Array(N), down: new Int32Array(N), acc: new Float32Array(N),
+    water: new Uint8Array(N), dist: new Uint16Array(N), moist: new Float32Array(N),
+    food: new Uint8Array(N), fert: new Float32Array(N), carc: new Float32Array(N),
+    animal: new Uint8Array(N), energy: new Float32Array(N), hunger: new Uint16Array(N), thirst: new Uint16Array(N),
+    sick: new Uint8Array(N), immune: new Uint16Array(N), soil: new Float32Array(N), slope: new Float32Array(N), face: new Int8Array(N), lava: new Uint8Array(N), eruptions: [], snow: new Float32Array(N), fire: new Uint8Array(N), char: new Uint8Array(N), ash: new Float32Array(N), sand: new Float32Array(N), crack: new Float32Array(N), graze: new Float32Array(N), root: new Uint8Array(N), strikes: [], rain: new Float32Array(N), wet: new Float32Array(N).fill(0.5), flow: new Float32Array(N),
+    lakeOf: new Int32Array(N), catchOf: new Int32Array(N), cellLevel: new Float32Array(N).fill(0.75), lakes: [], order: null, clouds: [], wind: 0, rainIn: 0, evap: 0, sickCount: [0, 0, 0, 0, 0],
+    hist: [], streak: 0, alive: { 1: true, 2: true, 3: true, 4: true }, wasWet: true, depthScale: 0.05
+  };
+  makeTerrain();
+  S.highland0 = highland(); S.worn = 0;
+  hydrology();
+  for (let i = 0; i < N; i++) S.flow[i] = 0.7 * S.acc[i];
+  for (let k = 0; k < 4; k++) spawnCloud(false);
+  updateWater(true);
+  for (let i = 0; i < N; i++) {
+    S.soil[i] = S.rock[i] ? 0 : 0.75 + rand() * 0.25;
+    if (S.water[i] || S.rock[i]) continue;
+    // Plants: 1 grass, 2 scrub, 3 trees. Trees start near water, scrub on drier ground.
+    if (rand() < 0.55 * S.moist[i] + 0.12) S.food[i] = S.moist[i] > 0.65 && rand() < 0.2 ? 3 : S.moist[i] < 0.35 ? 2 : 1;
+    S.fert[i] = rand() * 0.3;
+    const r = rand();
+    const st = P.start;
+    if (r < st.hunters) place(i, SP.HUNTER);
+    else if (r < st.hunters + st.foragers) place(i, SP.FORAGER);
+    else if (r < st.hunters + st.foragers + st.scav) place(i, SP.SCAV);
+    else if (r < st.hunters + st.foragers + st.scav + st.prey) place(i, SP.PREY);
+  }
+  logEntry(`Surveyed a new watershed: ${P.name}, world ${seed}.`);
+}
+function place(i, sp) {
+  S.animal[i] = sp; S.energy[i] = TRAITS[sp].breed / 2; S.hunger[i] = 0; S.thirst[i] = 0; S.sick[i] = 0; S.immune[i] = 0;
+}
+
+// ---------- terrain ----------
+// Elevation: a few octaves of smooth value noise for rolling ground, plus ridges of peaks.
+function makeTerrain() {
+  const { elev, rock } = S;
+  const octave = (cell, amp) => {
+    const gw = Math.ceil(W / cell) + 2, gh = Math.ceil(H / cell) + 2;
+    const g = new Float32Array(gw * gh).map(() => rand());
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const fx = x / cell, fy = y / cell, x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = fx - x0, ty = fy - y0, sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+      const a = g[y0 * gw + x0], b = g[y0 * gw + x0 + 1], c = g[(y0 + 1) * gw + x0], d = g[(y0 + 1) * gw + x0 + 1];
+      elev[y * W + x] += amp * ((a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy);
+    }
+  };
+  octave(40 * K, 0.55); octave(20 * K, 0.25); octave(10 * K, 0.12); octave(5 * K, 0.06);
+  const peaks = P.peaks + Math.floor(rand() * 2);
+  for (let k = 0; k < peaks; k++) {
+    const px = rand() * W, py = rand() * H, r = (8 + rand() * 12) * K, h = (0.35 + rand() * 0.3) * P.peakHeight;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const dx = x - px, dy = y - py;
+      elev[y * W + x] += h * Math.exp(-(dx * dx + dy * dy) / (r * r));
+    }
+  }
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < N; i++) { lo = Math.min(lo, elev[i]); hi = Math.max(hi, elev[i]); }
+  for (let i = 0; i < N; i++) { elev[i] = (elev[i] - lo) / (hi - lo); }
+  setRock();
+}
+function setRock() {
+  for (let i = 0; i < N; i++) {
+    // High ground is bare rock unless roots have cracked it into thin soil.
+    S.rock[i] = S.elev[i] > P.rockLine && S.crack[i] < 1 ? 1 : 0;
+    let s = 0;
+    for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0) s = Math.max(s, Math.abs(S.elev[i] - S.elev[j])); }
+    S.slope[i] = s;
+  }
+}
+
+// ---------- hydrology ----------
+// Priority-flood from the map edges: every square learns the lowest level water can drain away
+// at (`filled`) and which neighbour it drains to (`down`). Where filled sits above the ground the
+// square is in a hollow: that is lake bed, `depth` deep when full. Walking the squares from the
+// highest drainage level down, each passes its catchment on to `down`; big catchments are rivers.
+function hydrology() {
+  const { elev, filled, down, depth, acc } = S;
+  // Remember each lake's level square by square, so the rebuilt lakes start where the old ones were.
+  for (let i = 0; i < N; i++) if (S.lakeOf[i] >= 0 && S.lakes[S.lakeOf[i]]) S.cellLevel[i] = S.lakes[S.lakeOf[i]].level;
+  const heap = new MinHeap();
+  const seen = new Uint8Array(N);
+  for (let x = 0; x < W; x++) for (const y of [0, H - 1]) { const i = y * W + x; if (!seen[i]) { seen[i] = 1; filled[i] = elev[i]; down[i] = -1; heap.push(i, elev[i]); } }
+  for (let y = 0; y < H; y++) for (const x of [0, W - 1]) { const i = y * W + x; if (!seen[i]) { seen[i] = 1; filled[i] = elev[i]; down[i] = -1; heap.push(i, elev[i]); } }
+  const order = new Int32Array(N);
+  let n = 0;
+  while (heap.size) {
+    const c = heap.pop();
+    order[n++] = c;
+    for (let k = 0; k < 8; k++) {
+      const j = NB[c * 8 + k];
+      if (j < 0 || seen[j]) continue;
+      seen[j] = 1;
+      filled[j] = Math.max(elev[j], filled[c] + 1e-6);
+      down[j] = c;
+      heap.push(j, filled[j]);
+    }
+  }
+  const depths = [];
+  for (let i = 0; i < N; i++) { depth[i] = filled[i] - elev[i] > 1e-4 ? filled[i] - elev[i] : 0; if (depth[i]) depths.push(depth[i]); acc[i] = 1; }
+  for (let k = n - 1; k >= 0; k--) { const i = order[k]; if (down[i] >= 0) acc[down[i]] += acc[i]; }
+  S.order = order;
+  // Lakes: each connected patch of lake bed is one lake with its own water level. A lake's
+  // catchment is every square whose water drains into it. Levels carry over when the land changes.
+  const { lakeOf, catchOf, cellLevel } = S;
+  lakeOf.fill(-1);
+  const lakes = [];
+  for (let i = 0; i < N; i++) {
+    if (depth[i] <= 0 || lakeOf[i] >= 0) continue;
+    const id = lakes.length, stack = [i]; let cells = 0, level = 0;
+    lakeOf[i] = id;
+    while (stack.length) {
+      const c = stack.pop(); cells++; level += cellLevel[c];
+      for (let k = 0; k < 8; k++) { const j = NB[c * 8 + k]; if (j >= 0 && depth[j] > 0 && lakeOf[j] < 0) { lakeOf[j] = id; stack.push(j); } }
+    }
+    lakes.push({ cells, level: level / cells, catchment: 0, inflow: 0 });
+  }
+  for (let k = 0; k < n; k++) {
+    const i = order[k];
+    catchOf[i] = lakeOf[i] >= 0 ? lakeOf[i] : down[i] >= 0 ? catchOf[down[i]] : -1;
+    if (catchOf[i] >= 0) lakes[catchOf[i]].catchment++;
+  }
+  S.lakes = lakes;
+  depths.sort((a, b) => a - b);
+  S.depthScale = depths.length ? depths[Math.floor(depths.length * 0.9)] : 0.05;
+}
+class MinHeap {
+  constructor() { this.i = []; this.p = []; }
+  get size() { return this.i.length; }
+  push(i, p) {
+    const a = this.i, b = this.p; a.push(i); b.push(p);
+    let c = a.length - 1;
+    while (c > 0) { const q = (c - 1) >> 1; if (b[q] <= b[c]) break; [a[q], a[c]] = [a[c], a[q]]; [b[q], b[c]] = [b[c], b[q]]; c = q; }
+  }
+  pop() {
+    const a = this.i, b = this.p, top = a[0], li = a.pop(), lp = b.pop();
+    if (a.length) {
+      a[0] = li; b[0] = lp;
+      let c = 0;
+      for (;;) {
+        const l = 2 * c + 1, r = l + 1; let m = c;
+        if (l < a.length && b[l] < b[m]) m = l;
+        if (r < a.length && b[r] < b[m]) m = r;
+        if (m === c) break;
+        [a[m], a[c]] = [a[c], a[m]]; [b[m], b[c]] = [b[c], b[m]]; c = m;
+      }
+    }
+    return top;
+  }
+}
+
+// Wetness, 0 (deep drought) to 1 (flood): the season's swing plus any storm the player calls.
+function wetness() {
+  const phase = Math.sin(2 * Math.PI * S.day / SEASON);
+  return Math.max(0, Math.min(1, P.climate + P.swing * phase));
+}
+// Water is a store. Rain fills the lakes and evaporation takes water back every day, hardest in
+// the dry season, so lakes lag the seasons. Runoff follows recent rain more quickly and sets how
+// far the rivers reach.
+// Clouds blow in from the upwind edge on a slowly shifting wind and rain on the land beneath them,
+// more heavily over high ground. The wet season brings more of them; some are storm cells, smaller,
+// darker, faster and much heavier. Each square's wetness follows the rain it has had recently.
+function spawnCloud(storm) {
+  const ang = S.wind + (rand() - 0.5) * 0.5;
+  const speed = (storm ? 3.5 + rand() * 1.5 : 2 + rand() * 1.5) * K;
+  const r = (storm ? 9 + rand() * 7 : 13 + rand() * 15) * K;
+  const vx = Math.cos(ang) * speed, vy = Math.sin(ang) * speed;
+  // Start just off the upwind side of the map, somewhere across its width.
+  const cx = W / 2 - Math.cos(S.wind) * (W / 2 + r) + -Math.sin(S.wind) * (rand() - 0.5) * W;
+  const cy = H / 2 - Math.sin(S.wind) * (H / 2 + r) + Math.cos(S.wind) * (rand() - 0.5) * H;
+  S.clouds.push({ id: (S.cloudId = (S.cloudId || 0) + 1), x: cx, y: cy, vx, vy, r, rain: storm ? 1.6 + rand() * 0.8 : 0.5 + rand() * 0.5, storm });
+}
+function weather() {
+  const season = wetness();
+  S.wind += (rand() - 0.5) * 0.03;
+  // Spells: now and then a drought (few clouds, fierce evaporation) or a flood (frequent, heavy
+  // storms) takes over for a while, on top of the normal seasons.
+  if (S.spell) {
+    if (--S.spell.days <= 0) {
+      logEntry(S.spell.kind === 'drought' ? 'The drought breaks.' : 'The floodwaters start to fall.');
+      S.spell = null;
+    }
+  } else if (rand() < 1 / 700) {
+    S.spell = rand() < 0.55 ? { kind: 'drought', days: 80 + Math.floor(rand() * 120) } : { kind: 'flood', days: 20 + Math.floor(rand() * 40) };
+    logEntry(S.spell.kind === 'drought' ? 'A drought sets in. Clouds are scarce and the sun is fierce.' : 'A flood season: storm after storm rolls in.', true);
+  }
+  const spell = S.spell ? S.spell.kind : '';
+  const cloudRate = (0.16 * season * season + 0.006) * (spell === 'drought' ? 0.12 : spell === 'flood' ? 3 : 1);
+  if (rand() < cloudRate) spawnCloud(rand() < (spell === 'flood' ? 0.5 : 0.12));
+  const { rain, wet, elev } = S;
+  rain.fill(0);
+  S.clouds = S.clouds.filter((c) => {
+    c.x += c.vx; c.y += c.vy;
+    if (c.x < -2 * c.r || c.y < -2 * c.r || c.x > W + 2 * c.r || c.y > H + 2 * c.r) return false;
+    const R = Math.ceil(c.r * 1.6);
+    for (let y = Math.max(0, Math.floor(c.y - R)); y <= Math.min(H - 1, c.y + R); y++)
+      for (let x = Math.max(0, Math.floor(c.x - R)); x <= Math.min(W - 1, c.x + R); x++) {
+        const d2 = (x - c.x) ** 2 + (y - c.y) ** 2, i = y * W + x;
+        rain[i] += c.rain * Math.exp(-d2 / (c.r * c.r)) * (0.8 + 0.6 * elev[i]);
+      }
+    return true;
+  });
+  // Snow: above the snowline (lower in the wet season) rain falls as snow and builds a pack.
+  // Below it, or as the dry season warms, the pack melts and the meltwater runs downhill into
+  // rivers and lakes, so mountain-fed water lasts into a drought.
+  const snowline = P.rockLine * (0.72 + 0.15 * (1 - season));
+  const melt = S.melt || (S.melt = new Float32Array(N));
+  for (let i = 0; i < N; i++) {
+    melt[i] = 0;
+    if (elev[i] > snowline && season > 0.35) { S.snow[i] = Math.min(1, S.snow[i] + rain[i] * 0.03); rain[i] *= 0.3; }
+    else if (S.snow[i] > 0) {
+      const m = Math.min(S.snow[i], 0.002 + 0.006 * Math.max(0, snowline - elev[i]) * 10 + 0.004 * (1 - season));
+      S.snow[i] -= m; melt[i] = m;
+    }
+  }
+  // Plants drink: dense cover, woodland most of all, dries the ground it grows in and sends less
+  // water on to the rivers and lakes.
+  for (let i = 0; i < N; i++) wet[i] = Math.max(0, wet[i] + (Math.min(1, rain[i] + melt[i] * 25) - wet[i]) * 0.06 - 0.004 * THIRST[S.food[i]]);
+  // Lightning: storm cells strike the ground now and then. A strike on dry plant cover can start a
+  // fire; on rain-soaked ground it usually fizzles. Strikes are kept briefly so the 3D view can flash them.
+  const now = Date.now();
+  S.strikes = S.strikes.filter((st) => now - st.at < 220);
+  for (const c of S.clouds) {
+    if (!c.storm || rand() > 0.22) continue;
+    const a = rand() * Math.PI * 2, d = rand() * c.r * 0.8, x = Math.round(c.x + Math.cos(a) * d), y = Math.round(c.y + Math.sin(a) * d);
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    const i = y * W + x;
+    S.strikes.push({ i, cloud: c, at: now });
+    if (ignite(i, false)) logEntry(`Lightning starts a fire at (${x}, ${y}).`, true);
+  }
+  // Lakes: rain on a lake's catchment raises it; the sun takes water back, hardest in the dry season.
+  for (const lake of S.lakes) lake.inflow = 0;
+  for (let i = 0; i < N; i++) if (S.catchOf[i] >= 0) S.lakes[S.catchOf[i]].inflow += Math.min(1.5, rain[i]) + melt[i] * 25 - 0.05 * THIRST[S.food[i]];
+  S.evap = P.evap * (1.2 - season) * (spell === 'drought' ? 1.6 : spell === 'flood' ? 0.5 : 1);
+  let rainSum = 0, cells = 0;
+  for (const lake of S.lakes) {
+    const meanRain = lake.inflow / Math.max(1, lake.catchment);
+    lake.level = Math.max(0, Math.min(1, lake.level + P.rain * 2.4 * meanRain - S.evap));
+    rainSum += P.rain * 2.4 * meanRain * lake.cells; cells += lake.cells;
+  }
+  S.rainIn = cells ? rainSum / cells : 0;
+  // Rivers: each square passes its recent rain downhill, so a river swells below wherever it rained.
+  const { flow, down, order } = S;
+  // Snowmelt feeds the rivers directly, so melting snowfields send streams down from the peaks.
+  for (let i = 0; i < N; i++) flow[i] = 0.2 + wet[i] + melt[i] * 400;
+  for (let k = N - 1; k >= 0; k--) { const i = order[k]; if (down[i] >= 0) flow[down[i]] += flow[i]; }
+}
+// Lakes fill their hollows from the bottom up: as the store falls, the shallow edges dry first and
+// only the deepest water remains. Rivers are the squares that drain a big enough catchment; as
+// runoff falls, small streams stop first.
+function updateWater(force) {
+  let changed = force;
+  for (let i = 0; i < N; i++) {
+    const lake = S.lakeOf[i] >= 0 ? S.lakes[S.lakeOf[i]] : null;
+    const full = lake && S.depth[i] >= (1 - lake.level) * S.depthScale;
+    const wet = !S.lava[i] && (full || S.flow[i] >= 90 * K * K) ? 1 : 0;
+    if (wet !== S.water[i]) {
+      if (wet && S.animal[i]) continue;              // a rising lake waits for the animal to move
+      S.water[i] = wet; changed = true;
+      if (wet) S.food[i] = 0; else S.fert[i] = Math.min(1, S.fert[i] + 0.08);  // a dried bed is a little fertile
+    }
+  }
+  if (changed) moisture();
+}
+// Distance to water, and soil moisture that fades with it.
+function moisture() {
+  const { water, dist, moist, rock } = S;
+  dist.fill(65535);
+  const q = new Int32Array(N); let h = 0, t = 0;
+  for (let i = 0; i < N; i++) if (water[i]) { dist[i] = 0; q[t++] = i; }
+  while (h < t) {
+    const i = q[h++];
+    for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0 && dist[j] > dist[i] + 1) { dist[j] = dist[i] + 1; q[t++] = j; } }
+  }
+  for (let i = 0; i < N; i++) moist[i] = water[i] || rock[i] ? 0 : Math.max(0, 1 - (dist[i] - 1) / 16);
+}
+
+// ---------- one day ----------
+function step() {
+  const { water, rock, elev, dist, moist, food, fert, carc, animal, energy, hunger, thirst } = S;
+  const nbrs = (i) => { const out = []; for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0) out.push(j); } return out; };
+  const pick = (a) => a[Math.floor(rand() * a.length)];
+  const closest = (a) => { let b = Infinity; for (const j of a) b = Math.min(b, dist[j]); return a.filter((j) => dist[j] === b); };
+  const { sick, immune } = S;
+  const move = (i, j) => { if (i === j) return; const fx = (j % W) - (i % W); S.face[j] = fx > 0 ? 1 : fx < 0 ? -1 : S.face[i]; animal[j] = animal[i]; energy[j] = energy[i]; hunger[j] = hunger[i]; thirst[j] = thirst[i]; sick[j] = sick[i]; immune[j] = immune[i]; animal[i] = 0; energy[i] = 0; hunger[i] = 0; thirst[i] = 0; sick[i] = 0; immune[i] = 0; };
+  const clear = (i) => { animal[i] = 0; energy[i] = 0; hunger[i] = 0; thirst[i] = 0; sick[i] = 0; immune[i] = 0; };
+  const competition = (i) => {
+    const x = i % W, y = (i - x) / W; let preds = 0, prey = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const v = animal[ny * W + nx]; if (v === 1) prey++; else if (v === 2 || v === 3) preds++;
+    }
+    return preds / (prey + 1);
+  };
+  // Behaviour helpers. Distances are in squares (Chebyshev: diagonal steps count as one).
+  const cheb = (a, b) => Math.max(Math.abs((a % W) - (b % W)), Math.abs(((a - (a % W)) / W) - ((b - (b % W)) / W)));
+  // The nearest square within r holding an animal that passes the test, or -1.
+  const nearest = (i, r, test) => {
+    const x = i % W, y = (i - x) / W; let best = -1, bd = Infinity;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (!dx && !dy) continue;
+      const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const j = ny * W + nx, d = Math.max(Math.abs(dx), Math.abs(dy));
+      if (d < bd && test(animal[j], j)) { bd = d; best = j; }
+    }
+    return best;
+  };
+  const toward = (cands, goal) => { let best = [], bd = Infinity; for (const j of cands) { const d = cheb(j, goal); if (d < bd) { bd = d; best = [j]; } else if (d === bd) best.push(j); } return best; };
+  const away = (cands, threat) => { let best = [], bd = -1; for (const j of cands) { const d = cheb(j, threat); if (d > bd) { bd = d; best = [j]; } else if (d === bd) best.push(j); } return best; };
+  // Herd mates of a prey animal around a square (5 x 5), capped so herds do not pile up.
+  const mates = (j) => {
+    const x = j % W, y = (j - x) / W; let n = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      if (animal[ny * W + nx] === SP.PREY) n++;
+    }
+    return Math.min(4, n);
+  };
+  const isPredator = (v) => v === SP.HUNTER || v === SP.FORAGER;
+  const order = new Int32Array(N);
+  for (let i = 0; i < N; i++) order[i] = i;
+  for (let i = N - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); const t = order[i]; order[i] = order[j]; order[j] = t; }
+  const done = new Uint8Array(N);
+  for (const i of order) {
+    const a = animal[i];
+    if (!a || done[i]) continue;
+    const t = TRAITS[a];
+    const ns = nbrs(i);
+    const open = ns.filter((j) => !animal[j] && !water[j] && !rock[j] && !S.lava[j] && !S.fire[j] && S.snow[j] < 0.3);
+    // Needs: an animal sets off for water once it is getting thirsty, unless it is hungrier than it
+    // is thirsty, following the shortest way to the nearest water and drinking on any square
+    // beside it. The hungrier it gets, the further it looks for food (four squares, up to nine).
+    const thirstR = thirst[i] / t.parch, hungerR = hunger[i] / t.starve;
+    const parched = dist[i] > 1 && thirstR > 0.3 && thirstR >= hungerR;
+    const sight = 4 + Math.min(5, Math.round(hungerR * 8));
+    let target = i, gain = 0;
+    if (a === SP.PREY) {
+      // Prey flee a predator within three squares; otherwise they graze, preferring grass (scrub
+      // only when hungry; trees are not food), and keep close to their herd.
+      const threat = open.length ? nearest(i, 3, isPredator) : -1;
+      const edible = (j) => food[j] === 1 || (food[j] === 2 && hunger[i] >= 2);
+      if (parched && open.length) { const near = closest(open); const g = near.filter(edible); target = pick(g.length ? g : near); }
+      else if (threat >= 0) { const safe = away(open, threat); const g = safe.filter(edible); target = pick(g.length ? g : safe); }
+      else if (open.length) {
+        // With nothing to eat alongside, a hungry animal walks toward the nearest pasture it can see.
+        const goal = hunger[i] >= 1 && !open.some(edible) ? nearest(i, sight, (v, j) => !v && edible(j)) : -1;
+        const gap = goal >= 0 ? cheb(i, goal) : 0;
+        let bestScore = -Infinity;
+        for (const j of open) {
+          const score = (food[j] === 1 ? 2 : edible(j) ? 1 : 0) + (goal >= 0 && cheb(j, goal) < gap ? 1.5 : 0) + 0.35 * mates(j) + rand() * 0.8;
+          if (score > bestScore) { bestScore = score; target = j; }
+        }
+      }
+      move(i, target);
+      if (food[target] === 1 || (food[target] === 2 && hunger[target] >= 2)) {
+        gain = food[target] === 1 ? t.gain : t.gain * 0.5;
+        food[target] = 0; S.soil[target] = Math.max(0, S.soil[target] - 0.004); S.graze[target] += 1;
+      }
+    } else if (a === SP.SCAV) {
+      const meals = open.filter((j) => carc[j] > 0.3);
+      if (parched && open.length) target = pick(closest(open));
+      else if (meals.length) target = meals.reduce((b, j) => (carc[j] > carc[b] ? j : b));
+      else if (open.length) {
+        const x = i % W, y = (i - x) / W; let best = -1, bd = 99;
+        // Scavengers have keen noses: they smell remains two squares further than they would see food.
+        const smell = sight + 2;
+        for (let dy = -smell; dy <= smell; dy++) for (let dx = -smell; dx <= smell; dx++) {
+          const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const j = ny * W + nx, d = Math.max(Math.abs(dx), Math.abs(dy));
+          if (carc[j] > 0.3 && d < bd) { bd = d; best = j; }
+        }
+        if (best >= 0) {
+          const bx = best % W, by = (best - bx) / W;
+          const toward = open.filter((j) => { const jx = j % W, jy = (j - jx) / W; return Math.abs(jx - bx) + Math.abs(jy - by) < Math.abs(x - bx) + Math.abs(y - by); });
+          target = pick(toward.length ? toward : open);
+        } else {
+          // No remains in sight: keep company with a hunter, a couple of squares back.
+          const h = nearest(i, 6, (v) => v === SP.HUNTER);
+          if (h >= 0 && cheb(i, h) > 2) target = pick(toward(open, h));
+          else target = pick(open);
+        }
+      }
+      move(i, target);
+      if (carc[target] > 0.3) { const bite = Math.min(carc[target], t.gain); carc[target] -= bite; gain = bite; }
+    } else {
+      const rival = a === SP.HUNTER ? SP.FORAGER : SP.HUNTER;
+      const prey = ns.filter((j) => animal[j] === SP.PREY || (a === SP.HUNTER && animal[j] === SP.SCAV && rand() < 0.35));
+      const rivals = ns.filter((j) => animal[j] === rival), kin = ns.filter((j) => animal[j] === a);
+      const pressure = prey.length ? 0 : Math.min(1, competition(i) / 2);
+      const foes = [];
+      // Rivals and kin fight only when food is short, and most fights end with the loser driven off
+      // hurt rather than killed.
+      if (rivals.length && rand() < FIGHT * pressure) foes.push(...rivals);
+      if (kin.length && rand() < KIN_FIGHT * pressure) foes.push(...kin);
+      if (parched && open.length) { target = pick(closest(open)); move(i, target); }
+      else if (prey.length) { target = pick(prey); gain = t.gain; carc[target] += 1; clear(target); move(i, target); }
+      // Foragers pick fruit in woodland (the tree survives) and fall back on grass and scrub.
+      else if (a === SP.FORAGER && hunger[i] >= 2 && open.some((j) => food[j] === 3)) { target = pick(open.filter((j) => food[j] === 3)); move(i, target); gain = 0.6; }
+      else if (a === SP.FORAGER && hunger[i] >= 4 && open.some((j) => food[j] === 1 || food[j] === 2)) { target = pick(open.filter((j) => food[j] === 1 || food[j] === 2)); move(i, target); food[target] = 0; S.graze[target] += 0.7; gain = 0.8; }
+      else if (foes.length) {
+        const r = pick(foes);
+        const lethal = rand() < 0.3;
+        if (energy[i] >= energy[r]) {
+          if (lethal) { gain = energy[r] * 0.5; carc[r] += 3; clear(r); target = r; move(i, r); }
+          else energy[r] *= 0.6;
+        } else if (lethal) { energy[r] += energy[i] * 0.5; hunger[r] = 0; carc[i] += 3; clear(i); continue; }
+        else energy[i] *= 0.6;
+      } else if (open.length) {
+        // Stalk: head for the nearest prey in sight (foragers see a square less than hunters). A
+        // hungry forager with no prey in sight heads for the nearest woodland to pick fruit.
+        const quarry = nearest(i, a === SP.HUNTER ? sight : sight - 1, (v) => v === SP.PREY);
+        const grove = quarry < 0 && a === SP.FORAGER && hunger[i] >= 2 ? nearest(i, sight, (v, j) => !v && food[j] === 3) : -1;
+        const goal = quarry >= 0 ? quarry : grove;
+        target = pick(goal >= 0 ? toward(open, goal) : open);
+        move(i, target);
+      }
+    }
+    energy[target] += gain - t.cost;
+    hunger[target] = gain > 0 ? 0 : hunger[target] + 1;
+    thirst[target] = dist[target] <= 1 ? 0 : thirst[target] + 1;
+    // Dung: a little fertiliser, and every animal tramples the ground it stands on.
+    fert[target] += 0.015;
+    S.graze[target] += 0.08;
+    S.soil[target] = Math.max(0, S.soil[target] - 0.0007);
+    done[target] = 1;
+    // Illness: sick animals burn extra energy, may die of it, and pass it to healthy neighbours of
+    // their own kind that are not immune. Those that pull through stay immune for a while.
+    let diedSick = false;
+    if (sick[target]) {
+      const dz = DISEASE[a];
+      energy[target] -= t.cost * 0.6;
+      if (rand() < dz.death) diedSick = true;
+      else {
+        // Spreads to its own kind within two squares, so it travels through herds and packs and
+        // flares where animals crowd together, such as the last water holes in a drought.
+        const tx = target % W, ty = (target - tx) / W;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+          const nx = tx + dx, ny = ty + dy;
+          if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const j = ny * W + nx;
+          if (animal[j] === a && !sick[j] && !immune[j] && rand() < dz.spread) sick[j] = dz.days;
+        }
+        if (--sick[target] === 0) immune[target] = dz.immune;
+      }
+    }
+    if (diedSick || energy[target] <= 0 || hunger[target] > t.starve || thirst[target] > t.parch) { carc[target] += a === SP.PREY ? 3 : 5; clear(target); }
+    else if (energy[target] >= t.breed && target !== i && rand() >= CROWDING * ns.filter((j) => animal[j] === a).length / 8) {
+      animal[i] = a; energy[i] = energy[target] / 2; energy[target] /= 2; hunger[i] = 0; thirst[i] = thirst[target]; sick[i] = 0; immune[i] = 0; done[i] = 1;
+    }
+  }
+  // Plants: moist, fertile, low ground grows best; recent rain speeds growth, drought wilts.
+  const season = wetness();
+  for (let i = 0; i < N; i++) {
+    const w = 0.4 * season + 0.6 * S.wet[i];
+    if (S.lava[i]) {
+      food[i] = 0;
+      if (animal[i]) clear(i);
+      if (--S.lava[i] === 0) { fert[i] += 1.5; S.soil[i] = 1; S.ash[i] = 1; }
+      continue;
+    }
+    if (carc[i] > 0) { const rot = carc[i] * 0.06; carc[i] -= rot; fert[i] += rot * 0.25; if (carc[i] < 0.05) carc[i] = 0; }
+    // Fertiliser washes out and gets used up: about half is gone in 70 days.
+    fert[i] *= 0.99;
+    S.graze[i] *= 0.97;
+    if (S.immune[i]) S.immune[i]--;
+    // Nothing grows on bare rock (including ground that rises above the rock line) or in water. Tree
+    // roots beside rock slowly crack it; once broken up it becomes thin, poor soil plants can take.
+    if (rock[i]) {
+      food[i] = 0;
+      let trees = 0; for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0 && food[j] === 3) trees++; }
+      if (trees && (S.crack[i] += 0.0006 * trees) >= 1) { rock[i] = 0; S.soil[i] = 0.3; }
+      continue;
+    }
+    if (water[i]) continue;
+    // Soil health: roots and fertiliser slowly rebuild it; rain washes bare ground off slopes.
+    const soil = S.soil;
+    const feed = fert[i] > 0.8 ? 0.0006 : 0;
+    // Volcanic richness fades over many years (half gone in about seven) and keeps soil healthy.
+    if (S.ash[i] > 0) { S.ash[i] *= 0.99975; soil[i] = Math.min(1, soil[i] + 0.002 * S.ash[i]); }
+    if (food[i]) soil[i] = Math.min(1, soil[i] + (food[i] === 3 ? 0.006 : 0.004) * (1 - soil[i]) + feed);
+    else soil[i] = Math.min(1, Math.max(0, soil[i] - 0.0015 * w * Math.min(1, S.slope[i] * 25 * K) + 0.0003 + feed));
+    const height = Math.max(0.1, 1 - 0.85 * elev[i] / P.rockLine);
+    // Snow smothers plants and nothing grows under it.
+    if (S.snow[i] > 0.05) { if (S.snow[i] > 0.2) food[i] = 0; continue; }
+    const rich = (0.55 + 0.5 * Math.min(fert[i], 1.5)) * (1 + 1.2 * S.char[i] / 160) * (0.25 + 0.75 * S.soil[i]) * (1 + 1.5 * S.ash[i]) * (1 - 0.3 * S.sand[i]) * height;
+    if (food[i]) {
+      // Wilting: grass dies back first in the dry; scrub hangs on; trees need a real drought, though
+      // old trees fall now and then, opening clearings for grass.
+      const dry = (1 - moist[i]) * (1.4 - w);
+      const wilt = food[i] === 1 ? dry * 0.03 + 0.01 * (1 - height) : food[i] === 2 ? dry * 0.006 : (moist[i] < 0.2 ? 0.004 : 0.0012);
+      if (rand() < wilt) { food[i] = 0; continue; }
+      continue;
+    }
+    if (S.root[i] && !S.fire[i]) { if (rand() < 0.05 * (0.4 + w)) { food[i] = S.root[i]; S.root[i] = 0; } continue; }
+    if (animal[i] === SP.PREY) continue;
+    const n = [0, 0, 0, 0];
+    for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0) n[food[j]]++; }
+    // Grass spreads fast on moist ground; scrub creeps slowly and favours dry ground; trees seed
+    // rarely and only near other trees, on moist and healthy soil, so woodland stays patchy.
+    const grass = 3 * (0.03 + 0.15 * (n[1] + 0.5 * n[2]) / 8) * moist[i] * (0.4 + 1.2 * w) * rich;
+    const scrub = 0.15 * (0.002 + 0.03 * n[2] / 8) * Math.max(0.35, 1 - moist[i]) * rich;
+    const tree = moist[i] > 0.5 && S.soil[i] > 0.5 ? 0.1 * (0.0003 + 0.006 * n[3] / 8) * moist[i] * rich : 0;
+    const roll = rand();
+    if (roll < tree) food[i] = 3;
+    else if (roll < tree + scrub) food[i] = 2;
+    else if (roll < tree + scrub + grass) food[i] = 1;
+    if (food[i]) fert[i] = Math.max(0, fert[i] - 0.25);
+  }
+  S.day++;
+  weather();
+  erode(); blowSand();
+  if (S.day % 10 === 0) { S.worn = 1 - highland() / S.highland0; setRock(); hydrology(); updateWater(true); terrainVersion++; }
+  // Volcanoes wake more often as erosion wears the highlands down: at 10% worn, about three times as often.
+  if (rand() < (P.volcano ?? 1) / 2400 * (1 + 20 * Math.max(0, S.worn || 0))) erupt();
+  volcanism();
+  fires();
+  updateWater(false);
+  outbreaks();
+  migrate();
+  census();
+}
+
+// ---------- erosion ----------
+// The land wears down a little every day. In wet weather flowing water cuts its bed (more where a
+// river drains more land) and bare ground on a slope slumps toward its lowest neighbour. Plant
+// roots hold the ground: grass stops most slumping, scrub a little less, and under woodland the
+// ground does not move at all until the trees are gone. Healthy soil holds better than worn soil;
+// rock wears at a fifth of the rate, faster where roots have cracked it. What is carried off settles on the lake beds, so
+// valleys deepen and lakes slowly silt up. Water re-routes over the new ground every ten days.
+// How much each kind of cover lets the ground move: bare, grass, scrub, trees.
+const HOLD = [1, 0.12, 0.25, 0];
+function erode() {
+  const { elev, rock, food, soil, depth, water, filled, flow } = S;
+  let sediment = 0;
+  for (let i = 0; i < N; i++) {
+    const w = S.wet[i];
+    if (w < 0.25) continue;
+    // Heavy grazing and trampling break up the plant cover's hold and loosen bare ground, so
+    // overgrazed slopes wash away and gully.
+    const grazed = Math.min(1, S.graze[i] / 4);
+    const stone = rock[i] ? 0.2 + 0.8 * Math.min(1, S.crack[i]) : 1, hard = stone * (HOLD[food[i]] + (1 - HOLD[food[i]]) * grazed * 0.8) * (food[i] ? 1 : 1 + 2 * grazed);
+    if (flow[i] > 36 * K * K && depth[i] === 0) {
+      const cut = 0.000008 * Math.log10(flow[i] / (K * K)) * w * stone * (food[i] === 3 ? 0 : 1);
+      elev[i] = Math.max(0, elev[i] - cut); sediment += cut;
+    }
+    if (!water[i]) {
+      let j = -1, low = elev[i];
+      for (let k = 0; k < 8; k++) { const n = NB[i * 8 + k]; if (n >= 0 && elev[n] < low) { low = elev[n]; j = n; } }
+      const drop = elev[i] - low;
+      if (j >= 0 && drop > 0.002 / K) {
+        const slide = drop * 0.0016 * w * hard * Math.max(0.1, 1.2 - soil[i]);
+        elev[i] -= slide; elev[j] += slide * 0.6; sediment += slide * 0.4;
+      }
+    }
+  }
+  if (S.bedCount === undefined || S.day % 10 === 0) { S.bedCount = 0; for (let i = 0; i < N; i++) if (depth[i] > 0) S.bedCount++; }
+  if (S.bedCount) for (let i = 0; i < N; i++) if (depth[i] > 0) elev[i] = Math.min(filled[i] - 1e-4, elev[i] + sediment / S.bedCount);
+}
+// Wind: in dry weather the wind lifts fine sand off dry, bare ground (plants and moist soil hold
+// it) and drops it a couple of squares downwind, so sand drifts and piles into dunes that creep
+// with the wind. Sand also blows in from beyond the upwind edge of the map, most in a drought.
+// Sand landing in water silts it up; sandy ground is poor for plants until roots bind it.
+function blowSand() {
+  const { elev, food, water, rock, sand } = S;
+  const dx = Math.cos(S.wind), dy = Math.sin(S.wind), ox = Math.round(dx * 2), oy = Math.round(dy * 2);
+  const dry = Math.max(0, 1 - wetness()) * (S.spell === 'drought' ? 2.5 : S.spell === 'flood' ? 0.3 : 1);
+  for (let i = 0; i < N; i++) {
+    if (food[i]) { if (sand[i] > 0) sand[i] *= 0.985; continue; }
+    if (water[i] || rock[i] || S.lava[i] || S.snow[i] > 0.05) continue;
+    const parched = Math.max(0, 0.45 - S.wet[i]) / 0.45;
+    if (parched <= 0) continue;
+    const lift = 0.00003 * parched * dry * (0.4 + 0.6 * Math.max(sand[i], 1 - S.soil[i]));
+    const x = (i % W) + ox, y = ((i - (i % W)) / W) + oy;
+    elev[i] = Math.max(0, elev[i] - lift); sand[i] = Math.max(0, sand[i] - lift * 40);
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;   // blown off the map
+    const j = y * W + x;
+    elev[j] = Math.min(1, elev[j] + lift);
+    if (!water[j]) sand[j] = Math.min(1, sand[j] + lift * 40);
+  }
+  // Sand arriving from upwind lands along the edge it blows in across.
+  for (let i = 0; i < N; i++) {
+    const x = (i % W) - dx * 3 * K, y = ((i - (i % W)) / W) - dy * 3 * K;
+    if (x >= 0 && y >= 0 && x < W && y < H) continue;
+    if (water[i] || rock[i]) continue;
+    const add = 0.00003 * dry;
+    elev[i] = Math.min(1, elev[i] + add);
+    if (!food[i]) sand[i] = Math.min(1, sand[i] + add * 40);
+  }
+}
+// Mean height of the highest fifth of the land: how much high ground erosion has left.
+function highland() {
+  const e = Array.from(S.elev).sort((a, b) => b - a), top = Math.floor(N / 5);
+  let sum = 0; for (let k = 0; k < top; k++) sum += e[k];
+  return sum / top;
+}
+
+// ---------- volcanoes ----------
+// Every eruption draws its own lava and gas at random, and the volcano's shape comes from how they
+// play out, not from a template:
+// - lava spreads downhill and slumps until its slopes are no steeper than it can hold: runny lava
+//   travels far and settles flat into a broad shield; thick lava stops near the vent and stands
+//   steep, building a cone or a dome;
+// - gas drives explosions, which blast a pit at the summit and throw the rock around it as a rim,
+//   so only volcanoes that explode get craters, and lava that keeps welling up can fill them again;
+// - a large, gassy eruption can empty the chamber beneath it, and the summit then sinks into a
+//   caldera sized by how much came out.
+// Lava kills what it touches and blocks movement for about two months, then cools into very
+// fertile ground.
+function erupt(vent) {
+  if (vent === undefined) {
+    // Pick a fresh spot: mostly chance, with a lean toward higher ground, and well away from
+    // anywhere that erupted recently, so volcanoes appear all over the map rather than always
+    // on the tallest peak (which each eruption would make taller still).
+    S.vents = S.vents || [];
+    let best = -1, bestScore = -Infinity;
+    for (let t = 0; t < 40; t++) {
+      const x = 10 + Math.floor(rand() * (W - 20)), y = 10 + Math.floor(rand() * (H - 20)), i = y * W + x;
+      if (S.water[i]) continue;
+      let score = 0.4 * S.elev[i] + rand();
+      for (const v of S.vents) if (Math.hypot(x - v.x, y - v.y) < 30 * K) score -= 1;
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    vent = best >= 0 ? best : Math.floor(rand() * N);
+  }
+  S.vents = (S.vents || []).concat({ x: vent % W, y: (vent - (vent % W)) / W }).slice(-4);
+  // The ground swells a little as the eruption begins; the peak itself is built by the lava.
+  const vx = vent % W, vy = (vent - vx) / W, R = (12 + rand() * 8) * K, lift = 0.01 + rand() * 0.02;
+  for (let y = Math.max(0, Math.floor(vy - 2.5 * R)); y <= Math.min(H - 1, vy + 2.5 * R); y++)
+    for (let x = Math.max(0, Math.floor(vx - 2.5 * R)); x <= Math.min(W - 1, vx + 2.5 * R); x++) {
+      const d2 = (x - vx) ** 2 + (y - vy) ** 2;
+      S.elev[y * W + x] = Math.min(1, S.elev[y * W + x] + lift * Math.exp(-d2 / (R * R)));
+    }
+  // viscosity: 0 runny .. 1 thick; gas: 0 quiet .. 1 explosive (mostly low); supply: lava per day.
+  const viscosity = rand(), gas = rand() ** 1.6, supply = 0.6 + rand() * 0.9;
+  S.eruptions.push({ vent, vx, vy, viscosity, gas, supply, erupted: 0, laid: new Float32Array(N), days: 60 + Math.floor(rand() * 140), startHeight: S.elev[vent] });
+  const lava = viscosity < 0.33 ? 'runny' : viscosity < 0.66 ? 'sticky' : 'thick, slow';
+  const mood = gas < 0.2 ? 'quietly' : gas < 0.55 ? 'with the odd blast' : 'violently';
+  logEntry(`A volcano erupts ${mood} at (${vx}, ${vy}), pouring out ${lava} lava.`, true);
+  setRock(); hydrology(); updateWater(true); terrainVersion++;
+}
+// Lava slumps: wherever this eruption's lava stands steeper than it can hold, the excess slides to
+// the lowest neighbour. Thick lava holds about 25 m per square, runny lava barely 4 m. Only the lava
+// itself moves; the ground it covers and older, cooled rock stay put.
+function slump(e, radius) {
+  const hold = (0.004 + 0.021 * e.viscosity) / K, { vx, vy } = e;
+  for (let pass = 0; pass < 3; pass++)
+    for (let y = Math.max(0, vy - radius); y <= Math.min(H - 1, vy + radius); y++)
+      for (let x = Math.max(0, vx - radius); x <= Math.min(W - 1, vx + radius); x++) {
+        const i = y * W + x; if (!S.lava[i]) continue;
+        let low = -1, drop = hold;
+        for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0 && S.elev[i] - S.elev[j] > drop) { drop = S.elev[i] - S.elev[j]; low = j; } }
+        if (low < 0) continue;
+        const move = Math.min(e.laid[i], (drop - hold) * 0.5);
+        if (move <= 0) continue;
+        S.elev[i] -= move; e.laid[i] -= move; S.elev[low] = Math.min(1, S.elev[low] + move); e.laid[low] += move;
+        if (!S.lava[low]) { S.lava[low] = 40; S.food[low] = 0; if (S.animal[low]) { S.carc[low] += 2; S.animal[low] = 0; } }
+      }
+}
+// An explosion blasts rock out of the summit. What is thrown out mostly lands close by as a rim of
+// ash and cinders, so repeated blasts dig a crater and build a cone of debris around it.
+function blast(e) {
+  const { vx, vy, gas } = e, r = (1.2 + gas * (1.5 + rand() * 2)) * K, depth = 0.01 + 0.035 * gas * rand();
+  let removed = 0;
+  const pit = [], rim = [];
+  for (let y = Math.max(0, Math.floor(vy - 3 * r)); y <= Math.min(H - 1, vy + 3 * r); y++)
+    for (let x = Math.max(0, Math.floor(vx - 3 * r)); x <= Math.min(W - 1, vx + 3 * r); x++) {
+      const d = Math.hypot(x - vx, y - vy), i = y * W + x;
+      if (d < r) pit.push([i, d]); else if (d < 3 * r) rim.push([i, d]);
+      if (d < 4.5 * K && S.animal[i]) { S.carc[i] += 1; S.animal[i] = 0; }
+    }
+  for (const [i, d] of pit) { const cut = Math.min(S.elev[i], depth * (1 - (d / r) ** 2)); S.elev[i] -= cut; removed += cut; S.lava[i] = Math.max(S.lava[i], 50); }
+  let weight = 0; for (const [, d] of rim) weight += 1 - (d - r) / (2 * r);
+  for (const [i, d] of rim) S.elev[i] = Math.min(1, S.elev[i] + (0.7 * removed * (1 - (d - r) / (2 * r))) / weight);
+  const bombs = 6 + Math.floor(rand() * 12 * (0.5 + gas));
+  for (let b = 0; b < bombs; b++) {
+    const a = rand() * Math.PI * 2, d = (5 + rand() * 10) * K, x = Math.round(vx + Math.cos(a) * d), y = Math.round(vy + Math.sin(a) * d);
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    const i = y * W + x;
+    S.elev[i] = Math.min(1, S.elev[i] + 0.004);
+    ignite(i, true);
+  }
+  const R = (12 + 16 * gas + rand() * 8) * K;
+  for (let y = Math.max(0, Math.floor(vy - R)); y <= Math.min(H - 1, vy + R); y++) for (let x = Math.max(0, Math.floor(vx - R)); x <= Math.min(W - 1, vx + R); x++) {
+    const d = Math.hypot(x - vx, y - vy); if (d > R) continue;
+    const i = y * W + x; if (!S.water[i] && !S.rock[i]) S.ash[i] = Math.min(1, S.ash[i] + 0.35 * (1 - d / R));
+  }
+  logEntry(`The volcano at (${vx}, ${vy}) explodes. Burning debris rains down and ash covers the land around it.`, true);
+}
+// When a big eruption has drained the chamber under the volcano, the summit can fall in: the more
+// lava came out and the gassier it was, the likelier and wider the collapse. The ground sinks like
+// a piston, with steep walls at its edge, leaving a basin that later fills with rain.
+function collapse(e) {
+  const { vx, vy } = e, R = (2.5 + Math.min(4.5, e.erupted / (K * K) * 0.5) * (0.6 + 0.4 * rand())) * K;
+  const sink = Math.min(0.15, (0.3 * e.erupted) / (Math.PI * R * R) + 0.02);
+  for (let y = Math.max(0, Math.floor(vy - R - 2)); y <= Math.min(H - 1, vy + R + 2); y++)
+    for (let x = Math.max(0, Math.floor(vx - R - 2)); x <= Math.min(W - 1, vx + R + 2); x++) {
+      const d = Math.hypot(x - vx, y - vy), i = y * W + x;
+      if (d > R + 1) continue;
+      const edge = d < R - 1 ? 1 : Math.max(0, (R + 1 - d) / 2);
+      S.elev[i] = Math.max(0, S.elev[i] - sink * edge);
+      S.food[i] = 0;
+      if (S.animal[i]) { S.carc[i] += 2; S.animal[i] = 0; }
+    }
+  logEntry(`The chamber under the volcano at (${vx}, ${vy}) empties and its summit collapses into a caldera ${Math.round(R * 2)} squares across.`, true);
+}
+// Each day of an eruption, a few tongues of lava leave the vent and run downhill, thickest near the
+// vent and thinning as they go. Lava that finds no lower ground ponds and builds up where it is,
+// so it fills hollows and craters until it spills over. Lava reaching a deep lake cools and stops.
+function volcanism() {
+  if (!S.eruptions.length) return;
+  const burn = (e, i, add) => {
+    S.elev[i] = Math.min(1, S.elev[i] + add); e.laid[i] += add; e.erupted += add;
+    if (S.water[i]) { S.water[i] = 0; S.elev[i] = Math.min(1, S.elev[i] + 0.01); }
+    S.lava[i] = Math.max(S.lava[i], 45 + Math.floor(rand() * 35));
+    S.food[i] = 0;
+    if (S.animal[i]) { S.carc[i] += 2; S.animal[i] = 0; }
+  };
+  for (const e of S.eruptions) {
+    const runny = 1 - e.viscosity, reach = Math.round((8 + 70 * runny) * K), fade = (2 + 22 * runny) * K;
+    const thick = (0.0012 + 0.0024 * e.viscosity) * e.supply;
+    const flows = Math.round((1 + Math.floor(rand() * (2 + 3 * runny))) * K);
+    for (let f = 0; f < flows; f++) {
+      let cur = e.vent;
+      for (let step = 0; step < reach && cur >= 0; step++) {
+        const add = thick * Math.exp(-step / fade);
+        burn(e, cur, add);
+        for (let q = 0; q < 8; q++) { const n = NB[cur * 8 + q]; if (n >= 0 && rand() < 0.3) burn(e, n, add * 0.4); }
+        if (S.depth[cur] > 0 && S.lakeOf[cur] >= 0 && S.lakes[S.lakeOf[cur]] && S.lakes[S.lakeOf[cur]].level > 0.5) break;
+        let next = -1, low = S.elev[cur];
+        for (let q = 0; q < 8; q++) {
+          const n = NB[cur * 8 + q]; if (n < 0) continue;
+          const e2 = S.elev[n] + rand() * 0.003;
+          if (e2 < low) { low = e2; next = n; }
+        }
+        cur = next;
+      }
+    }
+    slump(e, Math.min(Math.round(30 * K), reach));
+    S.lava[e.vent] = 60;
+    if (rand() < 0.09 * e.gas * (0.4 + e.viscosity)) blast(e);
+    e.days--;
+    // Only a big, gassy eruption can drain its chamber enough to collapse (about one in eight).
+    e.collapsed = e.days <= 0 && e.gas > 0.45 && rand() < (e.gas - 0.45) * Math.min(1, e.erupted / (4 * K * K));
+    if (e.collapsed) collapse(e);
+    if (e.days % 5 === 0 || e.days <= 0) { setRock(); hydrology(); updateWater(true); terrainVersion++; }
+    if (e.days <= 0 && !e.collapsed) {
+      const { vx, vy } = e;
+      // A crater is a pit lower than every point of the ring around it; otherwise the top is rounded.
+      let ringLow = 1, summit = 0;
+      for (let y = Math.max(0, vy - 4); y <= Math.min(H - 1, vy + 4); y++) for (let x = Math.max(0, vx - 4); x <= Math.min(W - 1, vx + 4); x++) {
+        const d = Math.hypot(x - vx, y - vy), h = S.elev[y * W + x];
+        if (d < 3) summit = Math.max(summit, h);
+        if (d >= 1.5 && d < 3.5) ringLow = Math.min(ringLow, h);
+      }
+      const top = ringLow - S.elev[e.vent] > 0.008 ? 'around a summit crater' : 'to a rounded top';
+      logEntry(`The eruption at (${vx}, ${vy}) ends. The ground there now stands ${Math.round(Math.max(0, summit - e.startHeight) * 1000)} m higher, rising ${top}.`);
+    }
+  }
+  S.eruptions = S.eruptions.filter((e) => e.days > 0);
+  S.worn = 1 - highland() / S.highland0;
+}
+
+// ---------- fire ----------
+// Fire starts from lightning or volcanic debris and needs something to burn: plants, and dry
+// weather. Each day it spreads to neighbouring plant cover (faster the drier it is, fastest through
+// woodland), kills animals caught in it or right beside it, and burns out. Rain puts it out. It
+// strips trees for good, but grass and scrub resprout from their roots, and the ash left behind
+// makes the burn green up faster than the land around it.
+// Woodland burns longest and hottest; grass flashes through in a couple of days.
+const burnDays = (plant) => (plant === 3 ? 6 + Math.floor(rand() * 5) : plant === 2 ? 3 + Math.floor(rand() * 3) : 2 + Math.floor(rand() * 2));
+function ignite(i, force) {
+  if (S.water[i] || S.rock[i] || S.fire[i]) return false;
+  if (!force && (!S.food[i] || rand() > 1 - S.wet[i])) return false;
+  S.fire[i] = burnDays(S.food[i]);
+  return true;
+}
+function fires() {
+  const { fire, food, wet, rain, animal, fert } = S;
+  const spread = [];
+  let burning = 0;
+  for (let i = 0; i < N; i++) {
+    if (S.char[i]) S.char[i]--;
+    if (!fire[i]) continue;
+    if (rain[i] > 0.35) { fire[i] = 0; continue; }
+    burning++;
+    // Grass and scrub burn to the ground but their roots survive and resprout; trees are killed.
+    if (food[i] === 1 || food[i] === 2) S.root[i] = food[i];
+    food[i] = 0;
+    if (animal[i]) { S.carc[i] += 1; animal[i] = 0; }
+    // The heat kills some animals beside the flames too; the rest run (they never step into fire).
+    for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0 && animal[j] && rand() < 0.08) { S.carc[j] += 1; animal[j] = 0; S.sick[j] = 0; } }
+    for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0 && food[j] && !fire[j] && rand() < 0.3 * [0, 1, 1.25, 1.5][food[j]] * (1 - 0.9 * wet[j])) spread.push(j); }
+    if (--fire[i] === 0) { S.char[i] = 160; fert[i] += 0.25; S.ash[i] = Math.min(1, S.ash[i] + 0.15); }
+  }
+  for (const j of spread) if (!fire[j]) fire[j] = burnDays(food[j]);
+  S.burning = burning;
+}
+
+// ---------- migration ----------
+// Now and then a small group of animals wanders in from the edge of the map: rarely while a species
+// is doing well, far more often once it has dwindled.
+function migrate() {
+  if (!S.counts) return;
+  const sides = ['north', 'east', 'south', 'west'];
+  for (const sp of [1, 2, 3, 4]) {
+    const usual = N * DISEASE[sp].share;
+    const chance = S.counts[sp] < usual * 0.15 ? 0.03 : 0.004;
+    if (rand() >= chance) continue;
+    const side = Math.floor(rand() * 4), along = rand(), want = sp === 1 ? 6 + Math.floor(rand() * 7) : 2 + Math.floor(rand() * 4);
+    let placed = 0;
+    for (let t = 0; t < want * 6 && placed < want; t++) {
+      const spread = (rand() - 0.5) * 0.12, depth = Math.floor(rand() * 3);
+      const u = Math.min(0.999, Math.max(0, along + spread));
+      const x = side === 1 ? W - 1 - depth : side === 3 ? depth : Math.floor(u * W);
+      const y = side === 0 ? depth : side === 2 ? H - 1 - depth : Math.floor(u * H);
+      const i = y * W + x;
+      if (!S.animal[i] && !S.water[i] && !S.rock[i] && !S.lava[i]) { place(i, sp); placed++; }
+    }
+    if (placed) logEntry(`${placed} ${NAMES[sp].toLowerCase()} wander in from the ${sides[side]}.`);
+  }
+}
+
+// ---------- disease ----------
+// With no illness in a species, one can appear at random: rarely when the species is thin on the
+// ground, more often when it is crowded. It starts in one animal and spreads from there.
+function outbreaks() {
+  for (const sp of [1, 2, 3, 4]) {
+    if (S.sickCount[sp] || !S.counts || !S.counts[sp]) continue;
+    const crowded = Math.min(3, S.counts[sp] / (N * DISEASE[sp].share));
+    if (rand() >= (0.0006 + 0.0025 * crowded) * P.disease) continue;
+    for (let t = 0; t < 400; t++) {
+      const i = Math.floor(rand() * N);
+      if (S.animal[i] === sp && !S.immune[i]) {
+        S.sick[i] = DISEASE[sp].days;
+        for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0 && S.animal[j] === sp && rand() < 0.5) S.sick[j] = DISEASE[sp].days; }
+        logEntry(`An illness breaks out among the ${NAMES[sp].toLowerCase()}.`, true);
+        S.sickCount[sp] = 1;
+        break;
+      }
+    }
+  }
+}
+
+// ---------- census, score and log ----------
+function census() {
+  const n = [0, 0, 0, 0, 0], ill = [0, 0, 0, 0, 0];
+  for (let i = 0; i < N; i++) { n[S.animal[i]]++; if (S.sick[i]) ill[S.animal[i]]++; }
+  for (const sp of [1, 2, 3, 4]) if (S.sickCount[sp] && !ill[sp]) logEntry(`The illness among the ${NAMES[sp].toLowerCase()} has passed.`);
+  S.sickCount = ill;
+  S.hist.push(n.slice(1));
+  if (S.hist.length > 600) S.hist.shift();
+  let all = true;
+  for (const sp of [1, 2, 3, 4]) {
+    if (!n[sp]) all = false;
+    if (S.alive[sp] && !n[sp]) logEntry(`${NAMES[sp]} died out. Place some to bring them back.`, true);
+    if (!S.alive[sp] && n[sp]) logEntry(`${NAMES[sp]} are back.`);
+    S.alive[sp] = n[sp] > 0;
+  }
+  S.streak = all ? S.streak + 1 : 0;
+  if (S.streak > best) { best = S.streak; try { localStorage.setItem('watershed-best', String(best)); } catch (e) {} }
+  const isWet = Math.sin(2 * Math.PI * S.day / SEASON) >= 0;
+  if (isWet !== S.wasWet) logEntry(isWet ? 'The rains return.' : 'The dry season begins. Lakes will shrink from their shallow edges.');
+  S.wasWet = isWet;
+  S.counts = n;
+}
+let best = 0;
+try { best = Number(localStorage.getItem('watershed-best')) || 0; } catch (e) {}
+const logEl = document.getElementById('log');
+function logEntry(text, bad) {
+  const li = document.createElement('li');
+  if (bad) li.className = 'bad';
+  const d = S ? S.day : 0;
+  const b = document.createElement('b'); b.textContent = `Year ${Math.floor(d / SEASON) + 1}, day ${(d % SEASON) + 1}. `;
+  li.append(b, document.createTextNode(text));
+  logEl.prepend(li);
+  while (logEl.children.length > 40) logEl.lastChild.remove();
+}
+
+// ---------- drawing ----------
+const map = document.getElementById('map');
+const CP = Math.max(2, Math.round(8 / K));      // map pixels per square
+map.width = W * CP; map.height = H * CP;
+const ctx = map.getContext('2d');
+const baseCanvas = document.createElement('canvas'); baseCanvas.width = W; baseCanvas.height = H;
+const bctx = baseCanvas.getContext('2d');
+const img = bctx.createImageData(W, H);
+// Animal silhouettes, drawn once per species (healthy and sick, facing each way) on a 16-unit grid
+// and cached as small bitmaps. All face right; the left-facing copy is mirrored.
+const SPR = 14;
+const SHAPES = {
+  1(c) { // prey: an antelope with horns
+    c.beginPath(); c.ellipse(7.5, 9, 4.6, 2.4, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(10.5, 8); c.lineTo(12.2, 4.6); c.lineTo(14, 4.4); c.lineTo(14.6, 5.6); c.lineTo(12.6, 6.4); c.lineTo(11.8, 9); c.closePath(); c.fill();
+    c.fillRect(4, 10, 1.1, 4); c.fillRect(6, 10.5, 1.1, 3.5); c.fillRect(9, 10.5, 1.1, 3.5); c.fillRect(10.6, 10, 1.1, 4);
+    c.lineWidth = 0.9; c.beginPath(); c.moveTo(12.8, 4.6); c.lineTo(12, 1.8); c.moveTo(13.6, 4.4); c.lineTo(13.4, 1.6); c.stroke();
+  },
+  2(c) { // hunter: a big cat, low and long, tail raised
+    c.beginPath(); c.ellipse(7.5, 9.2, 5, 2.2, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.ellipse(13, 7.6, 2.1, 1.8, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(12.6, 6); c.lineTo(13.2, 4.8); c.lineTo(13.8, 6); c.fill();
+    c.fillRect(3.6, 10, 1.3, 3.8); c.fillRect(5.8, 10.4, 1.2, 3.4); c.fillRect(9.2, 10.4, 1.2, 3.4); c.fillRect(11, 10, 1.3, 3.8);
+    c.lineWidth = 1.1; c.beginPath(); c.moveTo(2.8, 8.6); c.quadraticCurveTo(0.6, 7, 1.4, 4.4); c.stroke();
+  },
+  3(c) { // forager: a stocky boar with a snout
+    c.beginPath(); c.ellipse(7.5, 9, 5, 3.2, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(11, 7); c.lineTo(14.8, 9); c.lineTo(14.6, 10.4); c.lineTo(11.5, 11); c.closePath(); c.fill();
+    c.beginPath(); c.moveTo(10.4, 6.4); c.lineTo(11, 4.8); c.lineTo(11.8, 6.6); c.fill();
+    c.fillRect(4, 11, 1.5, 3); c.fillRect(6.4, 11.4, 1.4, 2.6); c.fillRect(8.6, 11.4, 1.4, 2.6); c.fillRect(10.4, 11, 1.5, 3);
+  },
+  4(c) { // scavenger: a vulture, wings spread
+    c.beginPath(); c.moveTo(1, 5); c.quadraticCurveTo(4.5, 7, 6.6, 8.6); c.lineTo(8.6, 8.6); c.quadraticCurveTo(11, 7, 15, 5); c.quadraticCurveTo(11.5, 9.5, 9, 10.4); c.lineTo(6.8, 10.4); c.quadraticCurveTo(4.2, 9.5, 1, 5); c.fill();
+    c.beginPath(); c.ellipse(7.8, 10.6, 1.7, 2.6, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(9.6, 7.4, 1.3, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(10.6, 7.2); c.lineTo(11.8, 7.8); c.lineTo(10.6, 8.2); c.fill();
+    c.fillRect(7, 12.6, 0.8, 1.8); c.fillRect(8.2, 12.6, 0.8, 1.8);
+  }
+};
+const sprites = {};
+function sprite(sp, sick, flip) {
+  const key = `${sp}${sick ? 's' : ''}${flip ? 'l' : 'r'}`;
+  if (sprites[key]) return sprites[key];
+  const size = SPR * 2, cv = document.createElement('canvas'); cv.width = size; cv.height = size;
+  const c = cv.getContext('2d');
+  const col = sick ? [COLOURS[sp][0] * 0.4 + 170 * 0.6, COLOURS[sp][1] * 0.4 + 180 * 0.6, COLOURS[sp][2] * 0.4 + 40 * 0.6] : COLOURS[sp];
+  c.scale(size / 16, size / 16);
+  if (flip) { c.translate(16, 0); c.scale(-1, 1); }
+  // A dark outline first (the shape drawn slightly larger), then the fill, so animals read on any ground.
+  c.fillStyle = c.strokeStyle = 'rgba(20,18,14,0.85)';
+  for (const [dx, dy] of [[-0.7, 0], [0.7, 0], [0, -0.7], [0, 0.7]]) { c.save(); c.translate(dx, dy); SHAPES[sp](c); c.restore(); }
+  c.fillStyle = c.strokeStyle = `rgb(${col.map(Math.round).join(',')})`;
+  SHAPES[sp](c);
+  return (sprites[key] = cv);
+}
+function terrainColour(i) {
+  const e = S.elev[i];
+  // Hillshade from the slope toward the north-west.
+  const x = i % W, y = (i - x) / W;
+  const ex = S.elev[y * W + Math.min(W - 1, x + 1)] - S.elev[y * W + Math.max(0, x - 1)];
+  const ey = S.elev[Math.min(H - 1, y + 1) * W + x] - S.elev[Math.max(0, y - 1) * W + x];
+  const shade = 1 + (-(ex + ey)) * 6;
+  let r, g, b;
+  if (S.rock[i]) { r = 141; g = 138; b = 132; const p = Math.min(1, (e - P.rockLine) * 5); r += 60 * p; g += 60 * p; b += 62 * p; }
+  else if (e < 0.45) { const t = e / 0.45; r = 96 + 50 * t; g = 112 + 34 * t; b = 70 + 22 * t; }
+  else { const t = Math.min(1, (e - 0.45) / Math.max(0.1, P.rockLine - 0.45)); r = 146 + 40 * t; g = 146 + 22 * t; b = 92 + 30 * t; }
+  const soil = Math.min(1, S.fert[i] / 1.5) * 0.35;
+  r = r * (1 - soil) + 92 * soil; g = g * (1 - soil) + 66 * soil; b = b * (1 - soil) + 44 * soil;
+  // Snow: peaks whiten with the pack.
+  if (S.snow[i] > 0.02) { const v = Math.min(0.92, S.snow[i] * 3); r = r * (1 - v) + 245 * v; g = g * (1 - v) + 247 * v; b = b * (1 - v) + 250 * v; }
+  // Volcanic soil: dark and rich. Charred ground after a fire: blackened, fading as it regrows.
+  if (S.sand[i] > 0.05) { const v = Math.min(0.65, S.sand[i] * 0.8); r = r * (1 - v) + 222 * v; g = g * (1 - v) + 196 * v; b = b * (1 - v) + 140 * v; }
+  if (S.ash[i] > 0.05) { const v = Math.min(0.5, S.ash[i] * 0.5); r = r * (1 - v) + 70 * v; g = g * (1 - v) + 52 * v; b = b * (1 - v) + 40 * v; }
+  if (S.char[i]) { const v = S.char[i] / 160 * 0.7; r *= 1 - v; g *= 1 - v; b *= 1 - v; }
+  if (!S.rock[i]) { const worn = Math.max(0, 0.6 - S.soil[i]) / 0.6 * 0.6; r = r * (1 - worn) + 205 * worn; g = g * (1 - worn) + 185 * worn; b = b * (1 - worn) + 140 * worn; }
+  return [r * shade, g * shade, b * shade];
+}
+function draw() {
+  const d = img.data;
+  for (let i = 0; i < N; i++) {
+    let c;
+    const a = 0;
+    if (a) {
+      const t = TRAITS[a];
+      const worst = Math.max(S.hunger[i] / t.starve, S.thirst[i] / t.parch, 1 - Math.min(1, S.energy[i] / (t.breed * 0.5)));
+      const base = S.sick[i] ? [COLOURS[a][0] * 0.4 + 170 * 0.6, COLOURS[a][1] * 0.4 + 180 * 0.6, COLOURS[a][2] * 0.4 + 40 * 0.6] : COLOURS[a];
+      const f = 1 - 0.45 * Math.min(1, worst), tc = terrainColour(i);
+      c = [base[0] * f + tc[0] * (1 - f), base[1] * f + tc[1] * (1 - f), base[2] * f + tc[2] * (1 - f)];
+    } else if (S.fire[i]) {
+      const f = 0.75 + 0.25 * Math.random();
+      c = [255 * f, (110 + 90 * Math.random()) * f, 30];
+    } else if (S.lava[i]) {
+      const heat = Math.min(1, S.lava[i] / 60);
+      c = [70 + 185 * heat, 34 + 90 * heat * heat, 28];
+    } else if (S.water[i]) {
+      const deep = Math.min(1, S.depth[i] / (S.depthScale * 1.2));
+      const river = S.depth[i] === 0;
+      c = river ? [72, 140, 200] : [70 - 40 * deep, 132 - 60 * deep, 196 - 60 * deep];
+    } else if (S.carc[i] > 0.3) { c = [76, 52, 36]; }
+    else if (S.food[i]) {
+      // Plant cover is shaded by how thick the growth is around it: a lone plant is a light tint
+      // over the soil, a dense stand is deep green. Healthy soil deepens the colour a little.
+      let near = 0;
+      for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0) near += S.food[j]; }
+      const g = 0.18 + 0.5 * (near / 8) + 0.12 * S.soil[i];
+      const tc = terrainColour(i);
+      // Grass bright green, scrub dusty olive, woodland deep green.
+      const pc = S.food[i] === 1 ? [92, 150, 60] : S.food[i] === 2 ? [128, 124, 70] : [40, 92, 46];
+      const gg = S.food[i] === 3 ? Math.min(0.9, g + 0.25) : g;
+      c = [tc[0] * (1 - gg) + pc[0] * gg, tc[1] * (1 - gg) + pc[1] * gg, tc[2] * (1 - gg) + pc[2] * gg];
+    }
+    else c = terrainColour(i);
+    const o = i * 4;
+    // Cloud shadow: the ground under a cloud is a little darker, more so under storms.
+    const shadow = view3d ? 1 - Math.min(0.4, S.rain[i] * 0.3) : 1;
+    d[o] = c[0] * shadow; d[o + 1] = c[1] * shadow; d[o + 2] = c[2] * shadow; d[o + 3] = 255;
+  }
+  bctx.putImageData(img, 0, 0);
+  if (view3d && three) { draw3d(); drawHud(); return; }
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(baseCanvas, 0, 0, W * CP, H * CP);
+  // Animals: one picture per square, centred and a little larger than it. Starving, thirsty or
+  // low-energy animals fade.
+  for (let i = 0; i < N; i++) {
+    const a = S.animal[i];
+    if (!a) continue;
+    const t = TRAITS[a];
+    const worst = Math.max(S.hunger[i] / t.starve, S.thirst[i] / t.parch, 1 - Math.min(1, S.energy[i] / (t.breed * 0.5)));
+    ctx.globalAlpha = 1 - 0.55 * Math.min(1, worst);
+    const x = i % W, y = (i - x) / W;
+    ctx.drawImage(sprite(a, S.sick[i] > 0, S.face[i] < 0), x * CP + CP / 2 - SPR / 2, y * CP + CP / 2 - SPR / 2, SPR, SPR);
+  }
+  ctx.globalAlpha = 1;
+  if (hover >= 0) {
+    const x = hover % W, y = (hover - x) / W, r = brush();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc((x + 0.5) * CP, (y + 0.5) * CP, (tool === 'inspect' ? 0.8 : r) * CP, 0, Math.PI * 2); ctx.stroke();
+  }
+  drawHud();
+}
+
+// Rail: season dial, census numbers, chart, score.
+const dial = document.getElementById('dial'), dctx = dial.getContext('2d');
+const chart = document.getElementById('chart'), cctx = chart.getContext('2d');
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const lakeFull = () => { let a = 0, c = 0; for (const l of S.lakes) { a += l.level * l.cells; c += l.cells; } return c ? a / c : 0; };
+const rainCover = () => { let n = 0; for (let i = 0; i < N; i++) if (S.rain[i] > 0.2) n++; return n; };
+function drawHud() {
+  const yearDay = S.day % SEASON, wet = Math.sin(2 * Math.PI * S.day / SEASON) >= 0, w = wetness();
+  const spellName = S.spell ? (S.spell.kind === 'drought' ? ', drought' : ', flooding') : '';
+  document.getElementById('seasonName').textContent = (wet ? 'Wet season' : 'Dry season') + (spellName || (S.clouds.some((c) => c.storm) ? ', storms about' : ''));
+  document.getElementById('seasonDay').textContent = `Year ${Math.floor(S.day / SEASON) + 1} · day ${yearDay + 1} of ${SEASON}`;
+  let wc = 0; for (let i = 0; i < N; i++) wc += S.water[i];
+  let sh = 0, land = 0; for (let i = 0; i < N; i++) if (!S.rock[i] && !S.water[i]) { sh += S.soil[i]; land++; }
+  document.getElementById('soilLine').textContent = `Soil health ${(100 * sh / Math.max(1, land)).toFixed(0)}% on average`;
+  const net = S.rainIn - S.evap;
+  document.getElementById('waterLine').textContent = `Lakes ${(lakeFull() * 100).toFixed(0)}% full, ${net >= 0 ? 'filling' : 'evaporating'} · ${S.clouds.length} clouds · rain on ${(100 * rainCover() / N).toFixed(0)}% of the land${S.burning ? ` · ${S.burning} squares burning` : ''}`;
+  // Dial: the year as a ring, wet half blue, dry half ochre, with a hand at today.
+  const cx = 32, cy = 32, R = 26;
+  dctx.clearRect(0, 0, 64, 64);
+  dctx.lineWidth = 8;
+  dctx.strokeStyle = '#3A78B8'; dctx.beginPath(); dctx.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2); dctx.stroke();
+  dctx.strokeStyle = '#C79A4A'; dctx.beginPath(); dctx.arc(cx, cy, R, Math.PI / 2, Math.PI * 1.5); dctx.stroke();
+  const ang = -Math.PI / 2 + 2 * Math.PI * yearDay / SEASON;
+  dctx.strokeStyle = css('--ink'); dctx.lineWidth = 2.5;
+  dctx.beginPath(); dctx.moveTo(cx, cy); dctx.lineTo(cx + Math.cos(ang) * (R + 4), cy + Math.sin(ang) * (R + 4)); dctx.stroke();
+  // Census
+  const n = S.counts || [0, 0, 0, 0, 0];
+  const cen = document.getElementById('census');
+  cen.replaceChildren(...[1, 2, 3, 4].map((sp) => {
+    const div = document.createElement('div');
+    const sw = icon(['', 'prey', 'hunter', 'forager', 'scavenger'][sp], SPECIES_INK[sp]);
+    const label = document.createElement('span'); label.textContent = NAMES[sp];
+    const num = document.createElement('span'); num.className = 'n' + (n[sp] ? '' : ' gone') + (S.sickCount[sp] ? ' gone' : ''); num.textContent = n[sp] ? (S.sickCount[sp] ? `${n[sp]} · ${S.sickCount[sp]} sick` : n[sp]) : 'gone';
+    div.append(sw, label, num); return div;
+  }));
+  document.getElementById('streak').textContent = S.streak;
+  document.getElementById('best').textContent = best;
+  // Chart: each species on its own scale (prey vastly outnumber predators), latest day emphasised.
+  const dpr = window.devicePixelRatio || 1, cw = chart.clientWidth, ch = chart.clientHeight;
+  if (chart.width !== Math.round(cw * dpr)) { chart.width = Math.round(cw * dpr); chart.height = Math.round(ch * dpr); }
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cctx.clearRect(0, 0, cw, ch);
+  cctx.strokeStyle = css('--line'); cctx.lineWidth = 1;
+  for (const f of [0.25, 0.5, 0.75]) { cctx.beginPath(); cctx.moveTo(0, ch * f); cctx.lineTo(cw, ch * f); cctx.stroke(); }
+  const hist = S.hist;
+  if (hist.length > 1) {
+    for (const sp of [1, 2, 3, 4]) {
+      let mx = 1; for (const h of hist) mx = Math.max(mx, h[sp - 1]);
+      cctx.strokeStyle = `rgb(${COLOURS[sp].map((v) => (sp === 1 && css('--ink').startsWith('#1') ? v * 0.55 : v)).join(',')})`;
+      cctx.lineWidth = 1.5; cctx.beginPath();
+      hist.forEach((h, k) => { const x = (k / 599) * cw, y = ch - 4 - (h[sp - 1] / mx) * (ch - 8); k ? cctx.lineTo(x, y) : cctx.moveTo(x, y); });
+      cctx.stroke();
+    }
+  }
+}
+
+// ---------- 3D view ----------
+// The same picture, laid over a relief mesh: one vertex per square, lifted by its height, with lakes
+// held flat at their surface level. Inspect orbits; other tools paint (right-drag still orbits).
+let three = null, view3d = false;
+const frameEl = document.getElementById('frame');
+function build3d() {
+  if (three || !window.THREE) return three;
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.domElement.className = 'three';
+  renderer.domElement.setAttribute('aria-label', '3D view of the watershed');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0d1a26);
+  const camera = new THREE.PerspectiveCamera(40, W / H, 1, 2000);
+  camera.position.set(0, 120, 150); // replaced by centreView() once the controls exist
+  const geo = new THREE.PlaneGeometry(W - 1, H - 1, W - 1, H - 1);
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  mesh.rotation.x = -Math.PI / 2;
+  scene.add(mesh);
+  // Simple lit models: one shape per species, trees in the plant cover and boulders on the rock.
+  // Each kind is an InstancedMesh, so thousands of objects cost one draw call per kind.
+  scene.add(new THREE.HemisphereLight(0xf2f0e6, 0x4a5240, 0.9));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.7); sun.position.set(-60, 120, -40); scene.add(sun);
+  const lambert = (hex) => new THREE.MeshLambertMaterial({ color: hex });
+  const shapes = {
+    1: [new THREE.BoxGeometry(0.75, 0.55, 0.42), 0xE8E2CF, 0.35],                                       // prey: a block
+    2: [new THREE.ConeGeometry(0.32, 1.1, 5).rotateZ(-Math.PI / 2), 0xE2552E, 0.35],                    // hunter: a cone pointing ahead
+    3: [new THREE.SphereGeometry(0.42, 8, 6).scale(1.2, 0.8, 1), 0x2BB3A6, 0.35],                       // forager: a squat ball
+    4: [new THREE.OctahedronGeometry(0.5).scale(1.6, 0.35, 1), 0xA26BDB, 1.6]                           // scavenger: a flat diamond, aloft
+  };
+  const animals = {};
+  for (const sp of [1, 2, 3, 4]) {
+    const [g, colour, lift] = shapes[sp];
+    const im = new THREE.InstancedMesh(g, lambert(0xffffff), Math.round(3000 * K * K));
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.setColorAt(0, new THREE.Color(colour));
+    im.count = 0;
+    scene.add(im);
+    animals[sp] = { im, colour: new THREE.Color(colour), lift };
+  }
+  const trees = new THREE.InstancedMesh(new THREE.ConeGeometry(0.42, 1.3, 6).translate(0, 0.65, 0), lambert(0x3E7A35), Math.round(4000 * K * K));
+  trees.instanceMatrix.setUsage(THREE.DynamicDrawUsage); trees.count = 0; scene.add(trees);
+  const bushes = new THREE.InstancedMesh(new THREE.SphereGeometry(0.38, 7, 5).scale(1.2, 0.7, 1.2), lambert(0x7A7A44), Math.round(4000 * K * K));
+  bushes.instanceMatrix.setUsage(THREE.DynamicDrawUsage); bushes.count = 0; scene.add(bushes);
+  const boulders = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.55), lambert(0x8D8A84), Math.round(2500 * K * K));
+  boulders.count = 0; scene.add(boulders);
+  // Clouds are built from soft round puffs (camera-facing sprites with a feathered edge): heaped
+  // white tops over flatter grey bases. Storm cells tower higher, darker, with a curtain of rain.
+  const softTexture = (() => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const c = cv.getContext('2d'), g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.45, 'rgba(255,255,255,0.75)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(cv);
+  })();
+  const rainTexture = (() => {
+    const cv = document.createElement('canvas'); cv.width = 64; cv.height = 128;
+    const c = cv.getContext('2d');
+    const fade = c.createLinearGradient(0, 0, 0, 128); fade.addColorStop(0, 'rgba(160,172,188,0.9)'); fade.addColorStop(1, 'rgba(160,172,188,0)');
+    c.strokeStyle = fade; c.lineWidth = 1;
+    for (let k = 0; k < 26; k++) { const x = (k * 37) % 64 + 0.5; c.beginPath(); c.moveTo(x, 0); c.lineTo(x - 4, 128); c.stroke(); }
+    return new THREE.CanvasTexture(cv);
+  })();
+  const cloudGroups = new Map();
+  // Lightning: a few jagged bright lines reused for each flash.
+  const bolts = [];
+  for (let k = 0; k < 8; k++) {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(8 * 3), 3));
+    const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xf4f6ff, transparent: true, opacity: 0.95 }));
+    line.visible = false; line.renderOrder = 11; scene.add(line); bolts.push(line);
+  }
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.48; controls.minDistance = 40; controls.maxDistance = 400;
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  const pick3d = (ev) => {
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const hit = ray.intersectObject(mesh)[0];
+    if (!hit || !hit.uv) return -1;
+    const x = Math.round(hit.uv.x * (W - 1)), y = Math.round((1 - hit.uv.y) * (H - 1));
+    return y * W + x;
+  };
+  // Painting takes the left button before the orbit controls see it, unless the tool is Inspect.
+  renderer.domElement.addEventListener('pointerdown', (ev) => {
+    if (tool === 'inspect' || ev.button !== 0) return;
+    ev.stopImmediatePropagation(); painting = true; renderer.domElement.setPointerCapture(ev.pointerId); paint(pick3d(ev));
+  }, true);
+  renderer.domElement.addEventListener('pointermove', (ev) => { hover = pick3d(ev); inspect(hover); if (painting) paint(hover); });
+  renderer.domElement.addEventListener('pointerup', () => { flattenLevel = null; roughSeed = null; if (painting) { painting = false; if (terrainDirty) { settleTerrain(); logEntry('The water finds its new course.'); } } });
+  renderer.domElement.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  // The sides of the world: a strip from every edge square down to a base below the lowest ground.
+  const rim = [];
+  for (let x = 0; x < W; x++) rim.push(x);
+  for (let y = 1; y < H; y++) rim.push(y * W + W - 1);
+  for (let x = W - 2; x >= 0; x--) rim.push((H - 1) * W + x);
+  for (let y = H - 2; y > 0; y--) rim.push(y * W);
+  rim.push(0);
+  const sideGeo = new THREE.BufferGeometry();
+  sideGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(rim.length * 6), 3));
+  const sideIdx = [];
+  for (let k = 0; k < rim.length - 1; k++) { const a = k * 2, b = k * 2 + 1, c2 = k * 2 + 2, d = k * 2 + 3; sideIdx.push(a, b, c2, c2, b, d); }
+  sideGeo.setIndex(sideIdx);
+  const sides = new THREE.Mesh(sideGeo, new THREE.MeshLambertMaterial({ color: 0x6b5541, side: THREE.DoubleSide }));
+  scene.add(sides);
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(W - 1, H - 1), new THREE.MeshLambertMaterial({ color: 0x4a3b2e, side: THREE.DoubleSide }));
+  base.rotation.x = -Math.PI / 2; base.position.y = -4; scene.add(base);
+  three = { renderer, scene, camera, geo, controls, sideGeo, rim, animals, trees, bushes, boulders, dummy: new THREE.Object3D(), sickColour: new THREE.Color(0xAAB43C), boulderKey: '', cloudGroups, softTexture, rainTexture, bolts };
+  return three;
+}
+// A well-mixed hash of a square's index (0..1). Scattering with something like (i * k) % 5 repeats
+// every few squares and lines objects up in rows; this mixes the bits so the scatter looks random.
+function hash01(i) {
+  let h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function buildCloud(t, c) {
+  const grp = new THREE.Group();
+  const puffs = c.storm ? 22 : 14, tall = c.storm ? 2.2 : 0.9;
+  for (let k = 0; k < puffs; k++) {
+    const h1 = hash01(c.id * 97 + k), h2 = hash01(c.id * 131 + k * 7), h3 = hash01(c.id * 17 + k * 13);
+    const ang = h1 * Math.PI * 2, dist = Math.sqrt(h2);
+    const up = (1 - dist) * c.r * 0.35 * tall + h3 * c.r * 0.12 * tall;
+    const size = c.r * (0.55 + 0.55 * (1 - dist)) * (0.8 + 0.4 * h3);
+    // Lower puffs are shaded grey, upper ones lit white; storms are darker throughout.
+    const lit = Math.min(1, 0.55 + up / (c.r * 0.45 * tall + 0.01) * 0.45);
+    const base = c.storm ? [0.36, 0.4, 0.46] : [0.72, 0.75, 0.8], top = c.storm ? [0.72, 0.75, 0.8] : [1, 1, 1];
+    const mat = new THREE.SpriteMaterial({ map: t.softTexture, depthWrite: false, transparent: true,
+      color: new THREE.Color(base[0] + (top[0] - base[0]) * lit, base[1] + (top[1] - base[1]) * lit, base[2] + (top[2] - base[2]) * lit) });
+    const sp = new THREE.Sprite(mat);
+    sp.position.set(Math.cos(ang) * dist * c.r * 0.9, up, Math.sin(ang) * dist * c.r * 0.6);
+    sp.scale.set(size, size * 0.7, 1);
+    sp.userData.alpha = c.storm ? 0.75 : 0.6;
+    sp.renderOrder = 10;
+    grp.add(sp);
+  }
+  if (c.storm) {
+    const mat = new THREE.SpriteMaterial({ map: t.rainTexture, depthWrite: false, transparent: true, color: 0xb8c2d0 });
+    const curtain = new THREE.Sprite(mat);
+    curtain.scale.set(c.r * 1.3, 1, 1);
+    curtain.userData.alpha = 0.45;
+    curtain.renderOrder = 9;
+    grp.add(curtain);
+    grp.userData.curtain = curtain;
+  }
+  return grp;
+}
+// Frame the whole map: aim at the middle of the land (at its average height) and back the camera
+// off far enough that the map's full width fits the view, looking down at about 50 degrees.
+// The 3D view keeps the map's proportions but never grows taller than most of the window.
+function viewSize() {
+  if (frameEl.classList.contains('immersive')) return [frameEl.clientWidth, frameEl.clientHeight];
+  const w = frameEl.clientWidth || 800;
+  return [w, Math.round(Math.min(w * H / W, Math.max(260, (window.innerHeight || 1e4) * 0.78)))];
+}
+function centreView() {
+  const t = three; if (!t) return;
+  const relief = Number(document.getElementById('relief').value) * K;
+  let mean = 0; for (let i = 0; i < N; i++) mean += S.elev[i]; mean = (mean / N) * relief;
+  const [w, h] = viewSize();
+  const aspect = w / h, vfov = (t.camera.fov * Math.PI) / 180, hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+  const dist = Math.max((W * 0.56) / Math.tan(hfov / 2), (H * 0.62) / Math.tan(vfov / 2));
+  const tilt = (50 * Math.PI) / 180;
+  t.controls.target.set(0, mean, 0);
+  t.camera.position.set(0, mean + dist * Math.sin(tilt), dist * Math.cos(tilt));
+  t.camera.lookAt(t.controls.target);
+  t.controls.update();
+}
+// Height of a cloud's base: above the tallest ground plus room for its largest puffs.
+const CLOUD_BASE = (relief) => relief + 15 * K;
+function draw3d() {
+  const t = three;
+  const [w, h] = viewSize();
+  const size = t.renderer.getSize(new THREE.Vector2());
+  if (size.x !== w || size.y !== h) { t.renderer.setSize(w, h, true); t.camera.aspect = w / h; t.camera.updateProjectionMatrix(); }
+  const relief = Number(document.getElementById('relief').value) * K;
+  const pos = t.geo.attributes.position.array, col = t.geo.attributes.color.array, d = img.data;
+  for (let i = 0; i < N; i++) {
+    const surface = S.water[i] && S.depth[i] > 0 ? S.filled[i] : S.elev[i];
+    pos[i * 3 + 2] = surface * relief;
+    col[i * 3] = d[i * 4] / 255; col[i * 3 + 1] = d[i * 4 + 1] / 255; col[i * 3 + 2] = d[i * 4 + 2] / 255;
+  }
+  t.geo.attributes.position.needsUpdate = true;
+  t.geo.attributes.color.needsUpdate = true;
+  // Follow the edge squares' heights with the sides of the world.
+  const sp3 = t.sideGeo.attributes.position.array;
+  t.rim.forEach((i, k) => {
+    const x = i % W, y = (i - x) / W, X = x - (W - 1) / 2, Z = y - (H - 1) / 2, top = pos[i * 3 + 2];
+    sp3.set([X, top, Z, X, -4, Z], k * 6);
+  });
+  t.sideGeo.attributes.position.needsUpdate = true;
+  t.sideGeo.computeVertexNormals();
+  // Place the models on the surface: square (x, y) sits at world (x - (W-1)/2, height, y - (H-1)/2).
+  const at = (i, lift) => { const x = i % W, y = (i - x) / W; return [x - (W - 1) / 2, pos[i * 3 + 2] + lift, y - (H - 1) / 2]; };
+  const dm = t.dummy, counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  let treeCount = 0, bushCount = 0;
+  for (let i = 0; i < N; i++) {
+    const a = S.animal[i];
+    if (a) {
+      const A = t.animals[a], k = counts[a]++;
+      if (k >= 3000) continue;
+      const tr = TRAITS[a], worst = Math.max(S.hunger[i] / tr.starve, S.thirst[i] / tr.parch, 1 - Math.min(1, S.energy[i] / (tr.breed * 0.5)));
+      const [x, y, z] = at(i, A.lift);
+      dm.position.set(x, y, z); dm.rotation.set(0, S.face[i] < 0 ? Math.PI : 0, 0);
+      dm.scale.setScalar(1 - 0.35 * Math.min(1, worst)); dm.updateMatrix();
+      A.im.setMatrixAt(k, dm.matrix);
+      A.im.setColorAt(k, S.sick[i] ? t.sickColour : A.colour);
+    } else if (S.food[i] === 2 && !S.water[i] && bushCount < 4000 && hash01(i + 909) < 0.4) {
+      const [x, y, z] = at(i, 0.15);
+      dm.position.set(x + hash01(i + 111) - 0.5, y, z + hash01(i + 222) - 0.5); dm.rotation.set(0, 0, 0); dm.scale.setScalar(0.6 + 0.4 * hash01(i + 333)); dm.updateMatrix();
+      t.bushes.setMatrixAt(bushCount++, dm.matrix);
+    } else if (S.food[i] === 3 && !S.water[i] && treeCount < 4000) {
+      // Every tree square grows a tree, set off-centre in its square.
+      const [x, y, z] = at(i, 0);
+      dm.position.set(x + hash01(i + 101) - 0.5, y, z + hash01(i + 202) - 0.5); dm.rotation.set(0, 0, 0); dm.scale.setScalar(0.7 + 0.5 * S.soil[i]); dm.updateMatrix();
+      t.trees.setMatrixAt(treeCount++, dm.matrix);
+    }
+  }
+  for (const sp of [1, 2, 3, 4]) {
+    const im = t.animals[sp].im;
+    im.count = Math.min(3000, counts[sp]);
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  }
+  t.trees.count = treeCount; t.trees.instanceMatrix.needsUpdate = true;
+  t.bushes.count = bushCount; t.bushes.instanceMatrix.needsUpdate = true;
+  // Boulders only move when the land or the relief changes.
+  const key = `${relief}|${S.seed}|${S.day === 0}|${terrainVersion}`;
+  if (key !== t.boulderKey) {
+    t.boulderKey = key;
+    let b = 0;
+    for (let i = 0; i < N && b < 2500; i++) {
+      if (!S.rock[i] || hash01(i + 303) >= 0.2) continue;
+      // About one rock square in five carries a boulder, off-centre, turned and sized at random.
+      const [x, y, z] = at(i, 0.2);
+      dm.position.set(x + (hash01(i + 404) - 0.5) * 0.8, y, z + (hash01(i + 505) - 0.5) * 0.8);
+      dm.rotation.set(hash01(i + 606) * 6.28, hash01(i + 707) * 6.28, 0);
+      dm.scale.setScalar(0.5 + 0.8 * hash01(i + 808)); dm.updateMatrix();
+      t.boulders.setMatrixAt(b++, dm.matrix);
+    }
+    t.boulders.count = b; t.boulders.instanceMatrix.needsUpdate = true;
+  }
+  // Clouds: build each one's puffs the first time it appears, move the group as it drifts, and
+  // drop groups whose cloud has left the map.
+  const live = new Set();
+  for (const c of S.clouds) {
+    live.add(c.id);
+    let grp = t.cloudGroups.get(c.id);
+    if (!grp) { grp = buildCloud(t, c); t.cloudGroups.set(c.id, grp); t.scene.add(grp); }
+    // Clouds float well above the highest possible ground (heights run 0 to relief), so even the
+    // largest puffs never sink into a hillside.
+    grp.position.set(c.x - (W - 1) / 2, CLOUD_BASE(relief), c.y - (H - 1) / 2);
+    // Fade in and out at the map edge so clouds do not pop.
+    const edge = Math.min(c.x + c.r, W + c.r - c.x, c.y + c.r, H + c.r - c.y) / (c.r * 1.5);
+    const fade = Math.max(0, Math.min(1, edge));
+    // Fade a cloud as the camera nears it, so you never end up staring into a flat cloud card.
+    const near = Math.max(0, Math.min(1, (t.camera.position.distanceTo(grp.position) - c.r) / (c.r * 1.5)));
+    grp.children.forEach((sp) => { sp.material.opacity = sp.userData.alpha * fade * near; });
+    const curtain = grp.userData.curtain;
+    if (curtain) { curtain.scale.y = CLOUD_BASE(relief); curtain.position.y = -CLOUD_BASE(relief) / 2; }
+  }
+  for (const [id, grp] of t.cloudGroups) if (!live.has(id)) { t.scene.remove(grp); grp.children.forEach((sp) => sp.material.dispose()); t.cloudGroups.delete(id); }
+  // Flash recent strikes as jagged bolts from the cloud base to the ground.
+  const nowMs = Date.now();
+  const recent = S.strikes.filter((st) => nowMs - st.at < 220);
+  t.bolts.forEach((line, k) => {
+    const st = recent[k];
+    line.visible = !!st;
+    if (!st) return;
+    const x = st.i % W, y = (st.i - x) / W, gx = x - (W - 1) / 2, gz = y - (H - 1) / 2, top = CLOUD_BASE(relief), bottom = pos[st.i * 3 + 2];
+    const arr = line.geometry.attributes.position.array;
+    for (let p = 0; p < 8; p++) {
+      const f = p / 7, jit = p === 0 || p === 7 ? 0 : 1.2;
+      arr[p * 3] = gx + (hash01(st.at + p) - 0.5) * jit; arr[p * 3 + 1] = top + (bottom - top) * f; arr[p * 3 + 2] = gz + (hash01(st.at + p * 3 + 1) - 0.5) * jit;
+    }
+    line.geometry.attributes.position.needsUpdate = true;
+  });
+  t.controls.update();
+  t.renderer.render(t.scene, t.camera);
+}
+// The game is played in 3D. The flat map is kept only for browsers that cannot run WebGL.
+function start3d() {
+  let ok = false;
+  try { ok = !!build3d(); } catch (e) { ok = false; }
+  if (!ok) {
+    document.getElementById('reliefWrap').hidden = true;
+    document.getElementById('viewHint').textContent = 'This browser cannot show 3D, so you are seeing the flat map. Drag with a tool to paint.';
+    logEntry('3D is not available in this browser; showing the flat map instead.', true);
+    return;
+  }
+  view3d = true;
+  map.hidden = true;
+  frameEl.append(three.renderer.domElement);
+  draw3d();
+  centreView();
+}
+document.getElementById('recentre').addEventListener('click', () => centreView());
+// Full screen: true full screen where the browser allows it (phones without it get the whole window).
+const exitFullEl = document.getElementById('exitFull');
+function setImmersive(on) {
+  frameEl.classList.toggle('immersive', on);
+  exitFullEl.hidden = !on;
+  document.body.style.overflow = on ? 'hidden' : '';
+  requestAnimationFrame(() => centreView());
+}
+document.getElementById('fullscreen').addEventListener('click', () => {
+  setImmersive(true);
+  if (frameEl.requestFullscreen) frameEl.requestFullscreen().catch(() => {});
+});
+exitFullEl.addEventListener('click', () => {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  setImmersive(false);
+});
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && frameEl.classList.contains('immersive')) setImmersive(false); });
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && frameEl.classList.contains('immersive')) setImmersive(false); });
+// Detail changes the size of the grid, so it starts a fresh page at the new size.
+const detailEl = document.getElementById('detail');
+detailEl.value = detail;
+detailEl.addEventListener('change', () => {
+  try { localStorage.setItem('watershed-detail', detailEl.value); } catch (e) {}
+  location.reload();
+});
+
+// ---------- tools ----------
+const TOOLS = [
+  { id: 'inspect', label: 'Inspect', icon: 'inspect' },
+  { id: 'raise', label: 'Raise land', icon: 'raise' },
+  { id: 'dig', label: 'Dig a dam', icon: 'dig' },
+  { id: 'smooth', label: 'Smooth', icon: 'smooth' },
+  { id: 'roughen', label: 'Roughen', icon: 'roughen' },
+  { id: 'flatten', label: 'Flatten', icon: 'flatten' },
+  { id: 'plant', label: 'Plant grass', icon: 'plant', colour: '#4E8F3C' },
+  { id: 'trees', label: 'Plant trees', icon: 'tree', colour: '#2E5E34' },
+  { id: 'prey', label: 'Prey', icon: 'prey', colour: '#9C8F6A', sp: 1 },
+  { id: 'hunter', label: 'Hunters', icon: 'hunter', colour: '#E2552E', sp: 2 },
+  { id: 'forager', label: 'Foragers', icon: 'forager', colour: '#2BB3A6', sp: 3 },
+  { id: 'scav', label: 'Scavengers', icon: 'scavenger', colour: '#A26BDB', sp: 4 },
+  { id: 'clear', label: 'Remove animals', icon: 'remove' }
+];
+let tool = 'inspect';
+const toolsEl = document.getElementById('tools');
+for (const t of TOOLS) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'tool'; b.id = 'tool-' + t.id; b.setAttribute('aria-pressed', String(t.id === tool));
+  b.append(icon(t.icon, t.colour));
+  b.append(document.createTextNode(t.label));
+  b.addEventListener('click', () => { tool = t.id; for (const x of toolsEl.children) x.setAttribute('aria-pressed', String(x === b)); });
+  toolsEl.append(b);
+}
+const brushEl = document.getElementById('brush'), brushOut = document.getElementById('brushOut');
+const brush = () => Number(brushEl.value);
+brushEl.addEventListener('input', () => { brushOut.textContent = brushEl.value; });
+// Strength scales every tool: 5 is the standard dab, 1 a light touch, 10 twice as hard.
+const intensityEl = document.getElementById('intensity'), intensityOut = document.getElementById('intensityOut');
+const strength = () => Number(intensityEl.value) / 5;
+intensityEl.addEventListener('input', () => { intensityOut.textContent = intensityEl.value; });
+
+let hover = -1, painting = false, terrainDirty = false, flattenLevel = null, roughSeed = null;
+// Smooth value noise over the map (0..1), and a few octaves of it: broad swells with smaller
+// hummocks on top. Roughen adds this instead of per-square static, so the ground it makes is
+// coherent, like natural rolling land. One pattern per stroke, so going over a spot deepens it.
+function valueNoise(x, y, seed) {
+  const x0 = Math.floor(x), y0 = Math.floor(y), tx = x - x0, ty = y - y0;
+  const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+  const at = (a, b) => hash01((a * 73856093) ^ (b * 19349663) ^ (seed * 83492791));
+  const top = at(x0, y0) * (1 - sx) + at(x0 + 1, y0) * sx, bottom = at(x0, y0 + 1) * (1 - sx) + at(x0 + 1, y0 + 1) * sx;
+  return top * (1 - sy) + bottom * sy;
+}
+function bumps(x, y, seed) {
+  return 0.55 * valueNoise(x / 7, y / 7, seed) + 0.3 * valueNoise(x / 3.5, y / 3.5, seed + 1) + 0.15 * valueNoise(x / 1.7, y / 1.7, seed + 2) - 0.5;
+}
+function cellAt(ev) {
+  const r = map.getBoundingClientRect();
+  const x = Math.floor((ev.clientX - r.left) / r.width * W), y = Math.floor((ev.clientY - r.top) / r.height * H);
+  return x < 0 || y < 0 || x >= W || y >= H ? -1 : y * W + x;
+}
+function paint(c) {
+  if (c < 0 || tool === 'inspect') return;
+  const cx = c % W, cy = (c - cx) / W, r = brush();
+  const t = TOOLS.find((x) => x.id === tool);
+  // Flatten levels everything under the brush toward the height where the stroke began.
+  if (tool === 'flatten' && flattenLevel === null) flattenLevel = S.elev[c];
+  // Smoothing reads the heights as they were before this dab, so it blurs instead of smearing.
+  const before = tool === 'smooth' ? S.elev.slice() : null;
+  const m = strength();
+  for (let y = Math.max(0, cy - r); y <= Math.min(H - 1, cy + r); y++) for (let x = Math.max(0, cx - r); x <= Math.min(W - 1, cx + r); x++) {
+    const d = Math.hypot(x - cx, y - cy); if (d > r) continue;
+    const i = y * W + x, fall = 1 - d / (r + 1);
+    if (tool === 'raise' || tool === 'dig') { S.elev[i] = Math.max(0, Math.min(1, S.elev[i] + (tool === 'raise' ? 0.012 : -0.012) * fall * m)); terrainDirty = true; }
+    else if (tool === 'smooth') {
+      let sum = before[i], n = 1;
+      for (let k = 0; k < 8; k++) { const j = NB[i * 8 + k]; if (j >= 0) { sum += before[j]; n++; } }
+      S.elev[i] += (sum / n - S.elev[i]) * Math.min(1, 0.5 * fall * m); terrainDirty = true;
+    }
+    else if (tool === 'roughen') {
+      if (roughSeed === null) roughSeed = Math.floor(Math.random() * 1e6);
+      // Soft edge: full strength in the middle, easing to nothing at the rim of the brush.
+      const soft = Math.pow(Math.max(0, 1 - (d / (r + 1)) ** 2), 2);
+      S.elev[i] = Math.max(0, Math.min(1, S.elev[i] + bumps(x, y, roughSeed) * 0.06 * soft * m)); terrainDirty = true;
+    }
+    else if (tool === 'flatten') { S.elev[i] += (flattenLevel - S.elev[i]) * Math.min(1, 0.3 * fall * m); terrainDirty = true; }
+    else if (tool === 'trees') { if (!S.water[i] && !S.rock[i] && !S.lava[i] && Math.random() < Math.min(1, 0.15 * m)) S.food[i] = 3; }
+    else if (tool === 'plant') { if (!S.water[i] && !S.rock[i] && !S.lava[i] && Math.random() < Math.min(1, 0.3 * m)) S.food[i] = 1; }
+    else if (tool === 'clear') { S.animal[i] = 0; }
+    else if (t.sp) { if (!S.animal[i] && !S.water[i] && !S.rock[i] && !S.lava[i] && Math.random() < Math.min(1, 0.25 * m)) place(i, t.sp); }
+  }
+}
+let terrainVersion = 0;
+function settleTerrain() {
+  if (!terrainDirty) return;
+  terrainDirty = false;
+  terrainVersion++;
+  setRock(); hydrology(); updateWater(true);
+  for (let i = 0; i < N; i++) if (S.rock[i] && S.animal[i]) S.animal[i] = 0;
+}
+map.addEventListener('pointerdown', (ev) => { painting = true; map.setPointerCapture(ev.pointerId); paint(cellAt(ev)); });
+map.addEventListener('pointermove', (ev) => { hover = cellAt(ev); inspect(hover); if (painting) paint(hover); });
+map.addEventListener('pointerup', () => { painting = false; flattenLevel = null; roughSeed = null; if (terrainDirty) { settleTerrain(); logEntry('The water finds its new course.'); } });
+map.addEventListener('pointerleave', () => { hover = -1; });
+setInterval(() => { if (painting) settleTerrain(); }, 250);
+
+const readout = document.getElementById('readout');
+function inspect(i) {
+  if (i < 0) { readout.textContent = 'Hover the map to inspect a square.'; return; }
+  const x = i % W, y = (i - x) / W, parts = [`(${x}, ${y})`, `height ${(S.elev[i] * 1000).toFixed(0)} m`];
+  if (S.rock[i]) parts.push('rock');
+  if (S.fire[i]) parts.push('on fire');
+  else if (S.char[i]) parts.push('burnt ground');
+  if (S.sand[i] > 0.1) parts.push('wind-blown sand');
+  if (S.graze[i] > 2) parts.push('overgrazed');
+  if (S.ash[i] > 0.1) parts.push(`volcanic soil ${(S.ash[i] * 100).toFixed(0)}% rich`);
+  if (S.lava[i]) parts.push(S.eruptions.some((e) => Math.hypot(x - e.vx, y - e.vy) < 1.5) ? 'active vent' : `lava, ${S.lava[i]} days until it cools`);
+  if (S.water[i]) parts.push(S.depth[i] ? `lake ${(S.lakes[S.lakeOf[i]].level * 100).toFixed(0)}% full, ${(S.depth[i] * 1000).toFixed(0)} cm deep here` : `river carrying rain from ${Math.round(S.acc[i])} squares`);
+  if (S.rain[i] > 0.2) parts.push(S.rain[i] > 1.2 ? 'storm rain' : 'raining');
+  else { parts.push(`moisture ${(S.moist[i] * 100).toFixed(0)}%`); if (S.depth[i]) parts.push('dry lake bed'); }
+  if (!S.rock[i] && !S.water[i]) parts.push(`soil health ${(S.soil[i] * 100).toFixed(0)}%`);
+  if (S.food[i]) parts.push(['', 'grass', 'scrub', 'trees'][S.food[i]]);
+  if (S.snow[i] > 0.02) parts.push(`snow ${(S.snow[i] * 100).toFixed(0)} cm`);
+  if (S.carc[i] > 0.3) parts.push('remains');
+  const a = S.animal[i];
+  if (a) parts.push(`${NAMES[a].replace(/s$/, '').toLowerCase()}: energy ${S.energy[i].toFixed(1)}, ${S.hunger[i]} days since food, ${S.thirst[i]} since water${S.sick[i] ? `, sick (${S.sick[i]} days left)` : S.immune[i] ? ', immune' : ''}`);
+  readout.textContent = parts.join(' · ');
+}
+
+// ---------- controls and loop ----------
+let running = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const playBtn = document.getElementById('play');
+const syncPlay = () => { playBtn.replaceChildren(icon(running ? 'pause' : 'play'), document.createTextNode(running ? 'Pause' : 'Play')); };
+playBtn.addEventListener('click', () => { running = !running; syncPlay(); });
+document.addEventListener('keydown', (ev) => { if (ev.code === 'Space' && ev.target === document.body) { ev.preventDefault(); running = !running; syncPlay(); } });
+document.getElementById('volcano').addEventListener('click', () => { erupt(); });
+document.getElementById('storm').addEventListener('click', () => { spawnCloud(true); spawnCloud(true); logEntry('Storm cells build on the upwind edge.'); });
+document.getElementById('newworld').addEventListener('click', () => { newWorld(1 + Math.floor(Math.random() * 9999)); census(); draw(); centreView(); });
+const presetEl = document.getElementById('preset'), blurbEl = document.getElementById('presetBlurb');
+for (const [id, pr] of Object.entries(PRESETS)) { const o = document.createElement('option'); o.value = id; o.textContent = pr.name; presetEl.append(o); }
+try { const saved = localStorage.getItem('watershed-preset'); if (saved && PRESETS[saved]) { presetEl.value = saved; P = PRESETS[saved]; } } catch (e) {}
+blurbEl.textContent = P.blurb;
+// Choosing a world type surveys a fresh world of that type.
+presetEl.addEventListener('change', () => {
+  P = PRESETS[presetEl.value]; blurbEl.textContent = P.blurb;
+  try { localStorage.setItem('watershed-preset', presetEl.value); } catch (e) {}
+  newWorld(1 + Math.floor(Math.random() * 9999)); census(); draw(); centreView();
+});
+const speedEl = document.getElementById('speed');
+let last = 0;
+function frame(t) {
+  if (running && t - last > 1000 / 15) {
+    last = t;
+    for (let k = 0; k < Number(speedEl.value); k++) step();
+    if (hover >= 0) inspect(hover);
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+for (const b of document.querySelectorAll('button[data-icon]')) if (b.id !== 'play') b.prepend(icon(b.dataset.icon));
+const SPECIES_INK = { 1: '#9C8F6A', 2: '#E2552E', 3: '#2BB3A6', 4: '#A26BDB' };
+const KEY = [
+  ['prey', SPECIES_INK[1], 'Prey (blocks)'], ['hunter', SPECIES_INK[2], 'Hunters (cones)'], ['forager', SPECIES_INK[3], 'Foragers (balls)'],
+  ['scavenger', SPECIES_INK[4], 'Scavengers (flying)'], ['sick', '#A9B03E', 'Sick'], ['remains', '#7A5A44', 'Remains'],
+  ['plant', '#4E8F3C', 'Grass'], ['scrub', '#807C46', 'Scrub'], ['tree', '#2E5E34', 'Trees'], ['snow', '#9FB3C8', 'Snow'], ['water', '#3A78B8', 'Water'], ['soil', '#B39B6A', 'Worn soil'], ['soil', '#DEC48C', 'Sand'], ['rock', '#8D8A84', 'Rock'],
+  ['lava', '#F07A1C', 'Lava'], ['fire', '#E8A02A', 'Fire'], ['ash', '#6B5040', 'Volcanic soil']
+];
+document.getElementById('legend').replaceChildren(...KEY.map(([name, colour, label]) => { const sp = document.createElement('span'); sp.append(icon(name, colour), document.createTextNode(label)); return sp; }));
+newWorld(7);
+census();
+start3d();
+syncPlay();
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
